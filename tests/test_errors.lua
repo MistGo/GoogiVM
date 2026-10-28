@@ -1,0 +1,101 @@
+return function(t)
+    local P = t.P
+
+    -- API validation.
+    local f, err = t.custom(nil, {})
+    t:check(f == nil and type(err) == "string", "nil source must fail")
+    f, err = t.custom(123, {})
+    t:check(f == nil and type(err) == "string", "non-string source must fail")
+    f, err = t.custom("return 1", 5)
+    t:check(f == nil and type(err) == "string", "non-table env must fail")
+
+    -- Omitted env defaults to an empty sandbox, not _G.
+    local default_chunk = assert(t.custom("return 1, x"))
+    t:pack_equal(t.P(default_chunk()), P(1, nil), "default env")
+
+    -- Returned chunk type.
+    local chunk = assert(t:compile("return 1"))
+    t:equal(type(chunk), "function", "chunk type")
+
+    -- Empty chunk returns nothing.
+    local empty = assert(t:compile(""))
+    local p = t.P(empty())
+    t:equal(p.n, 0, "empty chunk results")
+
+    -- Fresh locals on each call.
+    local fresh = assert(t:compile("local x = 1; x = x + 1; return x"))
+    t:equal(fresh(), 2, "first invocation")
+    t:equal(fresh(), 2, "second invocation")
+
+    -- Syntax errors are returned as nil, string.
+    t:compile_error("local x =")
+    t:compile_error("if true then")
+    t:compile_error("while do end")
+    t:compile_error("repeat x = 1")
+    t:compile_error("return 1 +")
+    t:compile_error("break")
+    t:compile_error("function f(")
+    t:compile_error("local t = {1,,2}")
+    t:compile_error("a() = 1")
+
+    -- Syntax errors have line information.
+    local bad, msg = t.custom("local x = 1\nif x then\n  local y =\nend", {})
+    t:check(bad == nil, "bad source must not compile")
+    t:check(type(msg) == "string" and msg:find("line 4", 1, true) ~= nil,
+        "syntax error should mention line 4: " .. tostring(msg))
+
+    -- Compile errors must not execute anything.
+    local side = {}
+    local cf = t.custom("x = 1; local = 2", side)
+    t:check(cf == nil and side.x == nil, "compile error must not execute")
+
+    -- Runtime errors must propagate to pcall, not be swallowed by the loader.
+    t:runtime_error("return nil + 1")
+    t:runtime_error("return (nil).x")
+    t:runtime_error("local f; return f()")
+    t:runtime_error("local t = {}; return t[1].x")
+    t:runtime_error("return 'a' < 1")
+    t:runtime_error("return 1 < false")
+    t:runtime_error("return {} .. 'x'")
+    t:runtime_error("return #123")
+    t:runtime_error("for i = 1, 2, 0 do end")
+    t:runtime_error("for i = 1, 'x' do end")
+    t:runtime_error("for i = true, 2 do end")
+
+    -- runtime errors can be caught by pcall.
+    t:expect([[
+local ok, err = pcall(function() return nil + 1 end)
+return ok, type(err)
+]], P(false, "string"))
+
+    -- error objects (tables) are preserved.
+    t:expect([[
+local ok, err = pcall(function() error({ code = 7 }) end)
+return ok, type(err), err.code
+]], P(false, "table", 7))
+
+    -- xpcall handler.
+    t:expect([[
+local hit = false
+local ok, value = xpcall(function() error('boom') end, function(e)
+    hit = true
+    return type(e)
+end)
+return ok, value, hit
+]], P(false, "string", true))
+
+    -- Errors from metamethods and iterators.
+    t:runtime_error([[
+local t = setmetatable({}, {__add = function() error('add') end})
+return t + 1
+]])
+    t:runtime_error([[
+for k in function() error('iter') end do end
+]])
+
+    -- Runtime error after partial side effects keeps the side effect.
+    local env = {}
+    local c = assert(t:compile("x = 1; return nil + 1", env))
+    local ok = pcall(c)
+    t:check(not ok and env.x == 1, "side effects before runtime error")
+end
