@@ -127,6 +127,8 @@ lua run_all_tests.lua
 custom_loadstring_full.lua   # библиотека
 README.md                    # английская версия
 README.ru.md                 # этот файл
+TECHNICAL.md                 # краткое описание реализации
+TECHNICAL.ru.md              # это описание по-русски
 LICENSE                      # MIT
 run_all_tests.lua            # запуск тестов
 tests/                       # тесты
@@ -134,6 +136,8 @@ AGENTS.md                    # заметки для ИИ-агентов
 .gitignore
 .gitattributes
 ```
+
+Как устроены компилятор, байткод и VM, описано в [`TECHNICAL.ru.md`](TECHNICAL.ru.md) или [`TECHNICAL.md`](TECHNICAL.md).
 
 ## Лицензия
 

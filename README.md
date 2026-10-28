@@ -127,6 +127,8 @@ On the project microbenchmarks, this interpreter was about **1.6x faster than Fi
 custom_loadstring_full.lua   # the library
 README.md                    # this file
 README.ru.md                 # Russian version
+TECHNICAL.md                 # short implementation guide
+TECHNICAL.ru.md              # Russian implementation guide
 LICENSE                      # MIT
 run_all_tests.lua            # test runner
 tests/                       # test suite
@@ -134,6 +136,8 @@ AGENTS.md                    # notes for AI coding agents
 .gitignore
 .gitattributes
 ```
+
+For how the compiler, bytecode, and VM work, see [`TECHNICAL.md`](TECHNICAL.md) or [`TECHNICAL.ru.md`](TECHNICAL.ru.md).
 
 ## License
 

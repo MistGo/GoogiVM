@@ -41,6 +41,7 @@ The test harness may use `loadstring`/`load`, `os.clock`, `print`, and `dofile`.
 | `tests/helpers.lua` | Shared test harness |
 | `tests/test_*.lua` | Test modules |
 | `README.md`, `README.ru.md` | User docs |
+| `TECHNICAL.md`, `TECHNICAL.ru.md` | Short implementation guide |
 | `LICENSE` | MIT |
 
 ## Commands
@@ -60,6 +61,8 @@ Expected baseline:
 - Lua 5.4: 18,630 checks, 0 failed.
 
 If `luajit` is unavailable in the environment, run the Lua suite and report that the primary host was not tested.
+
+For a longer explanation, read `TECHNICAL.md`.
 
 ## Architecture in one minute
 
