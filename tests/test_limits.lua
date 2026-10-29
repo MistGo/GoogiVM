@@ -25,6 +25,43 @@ return function(t)
         end
     end
 
+    -- Guest pcall/xpcall must not bypass the fenv guards by calling them
+    -- through a native protected call.
+    if getfenv then
+        local f = custom([[
+local blocked = pcall(getfenv, print)
+local plain = pcall(getfenv, 0)
+return blocked, plain
+]], { getfenv = getfenv, print = print, pcall = pcall })
+        t:check(f ~= nil, "guest pcall(getfenv) compiled")
+        if f then
+            local ok, blocked, plain = pcall(f)
+            t:check(ok and blocked == false and plain == true,
+                "pcall(getfenv, native) must be blocked, pcall(getfenv, 0) allowed")
+        end
+
+        f = custom([[
+local ok = xpcall(getfenv, function() return 0 end, print)
+return ok
+]], { getfenv = getfenv, print = print, xpcall = xpcall })
+        t:check(f ~= nil, "guest xpcall(getfenv) compiled")
+        if f then
+            local ok, res = pcall(f)
+            t:check(ok and res == false, "xpcall(getfenv, native) must be blocked")
+        end
+    end
+
+    if setfenv then
+        local f = custom([[
+return pcall(setfenv, 0, {})
+]], { setfenv = setfenv, pcall = pcall })
+        t:check(f ~= nil, "guest pcall(setfenv, 0) compiled")
+        if f then
+            local ok, res = pcall(f)
+            t:check(ok and res == false, "pcall(setfenv, 0, {}) must be blocked")
+        end
+    end
+
     -- Options must be a table.
     local f, err = custom("return 1", {}, 5)
     t:check(f == nil and type(err) == "string", "non-table options rejected")

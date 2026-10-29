@@ -292,13 +292,70 @@ local function sandbox_error(err, trace, with_trace)
     return sandbox_message(err)
 end
 
+-- Forward declarations: defined after get_closure_env/set_closure_env below.
+local sandbox_getfenv, sandbox_setfenv
+
 -- Kept outside run_closure so the dispatch loop stays small enough for the
 -- LuaJIT trace compiler.
 local function protected_call(is_xpcall, target, handler, tr, outer_trace,
-                              S, fpos, top)
+                              S, fpos, top, caller_env, frames, fi)
     local target_info = closure_info[target]
     local te = target_info and tr or outer_trace
     local rs
+
+    -- getfenv/setfenv must never reach the host implementation: the host would
+    -- happily return a native function's environment, which is the host _G.
+    local guarded, new_e
+    if getfenv and target == getfenv then
+        guarded = function(a)
+            return sandbox_getfenv(a, caller_env, frames, fi)
+        end
+    elseif setfenv and target == setfenv then
+        guarded = function(a, b)
+            local r
+            r, new_e = sandbox_setfenv(a, b, frames, fi)
+            return r
+        end
+    end
+    if guarded then
+        -- pcall(target, ...) stores args from fpos+2; xpcall(target, handler, ...)
+        -- shifts them by the handler slot.
+        local first = is_xpcall and (fpos + 3) or (fpos + 2)
+        local nargs = top - first + 1
+        if is_xpcall then
+            local function finish(err)
+                local msg = sandbox_error(err, te, false)
+                if handler == nil then
+                    return msg
+                end
+                if closure_info[handler] then
+                    return run_closure(handler, {}, msg)
+                end
+                return handler(msg)
+            end
+            if nargs < 1 then
+                rs = pack(xpcall(guarded, finish))
+            elseif nargs == 1 then
+                rs = pack(xpcall(guarded, finish, S[first]))
+            else
+                rs = pack(xpcall(guarded, finish, S[first], S[first + 1]))
+            end
+        else
+            if nargs < 1 then
+                rs = pack(pcall(guarded))
+            elseif nargs == 1 then
+                rs = pack(pcall(guarded, S[first]))
+            else
+                rs = pack(pcall(guarded, S[first], S[first + 1]))
+            end
+            if not rs[1] then
+                rs[2] = sandbox_error(rs[2], te, false)
+            end
+        end
+        rs.new_e = new_e
+        return rs
+    end
+
     if not is_xpcall then
         if target_info then
             rs = pack(pcall(run_closure, target, tr, unpack(S, fpos + 2, top)))
@@ -393,6 +450,77 @@ local function set_closure_env(fn, newenv)
         info.fenv = pcall(setfenv, fn, newenv)
     end
     return true
+end
+
+-- Sandbox-safe getfenv/setfenv. Both the CALLD special case and guest
+-- pcall/xpcall route through these, so a native function environment (the
+-- host _G) can never be reached from interpreted code.
+sandbox_getfenv = function(arg, caller_env, frames, fi)
+    if arg == nil then
+        arg = 1
+    end
+    if type(arg) == "number" then
+        if arg == 0 then
+            return caller_env
+        end
+        if arg < 0 then
+            error("bad argument #1 to 'getfenv' (invalid level)", 0)
+        end
+        local idx = fi - arg + 1
+        if idx < 1 then
+            error("bad argument #1 to 'getfenv' (invalid level)", 0)
+        end
+        return frames[idx].env
+    elseif type(arg) == "function" then
+        if closure_info[arg] then
+            return get_closure_env(arg)
+        end
+        error("getfenv: native function environments are disabled", 0)
+    end
+    error("bad argument #1 to 'getfenv' (number or function expected)", 0)
+end
+
+sandbox_setfenv = function(target, newenv, frames, fi)
+    if type(newenv) ~= "table" then
+        error("bad argument #2 to 'setfenv' (table expected)", 0)
+    end
+    if type(target) == "number" then
+        if target <= 0 then
+            error("cannot change environment of thread", 0)
+        end
+        local idx = fi - target + 1
+        if idx < 1 then
+            error("invalid level", 0)
+        end
+        local fr = frames[idx]
+        set_closure_env(fr.cl, newenv)
+        local new_e
+        for j = 1, fi do
+            if frames[j].cl == fr.cl then
+                frames[j].env = newenv
+                if j == fi then
+                    new_e = newenv
+                end
+            end
+        end
+        return fr.cl, new_e
+    elseif type(target) == "function" then
+        if closure_info[target] then
+            set_closure_env(target, newenv)
+            local new_e
+            for j = 1, fi do
+                if frames[j].cl == target then
+                    frames[j].env = newenv
+                    if j == fi then
+                        new_e = newenv
+                    end
+                end
+            end
+            return target, new_e
+        end
+        error("setfenv: native function environments are disabled", 0)
+    end
+    error("bad argument #1 to 'setfenv' (number or function expected)", 0)
 end
 
 run_closure = function(fn, trace, ...)
@@ -1842,36 +1970,8 @@ run_closure = function(fn, trace, ...)
                 top = fpos + cmax - 1
             else
                 if getfenv and f == getfenv then
-                    local arg
-                    if nargs == 0 then
-                        arg = 1
-                    else
-                        arg = S[fpos + 1]
-                    end
-                    local r
-                    if type(arg) == "number" then
-                        local lvl = arg
-                        if lvl == 0 then
-                            r = e
-                        elseif lvl < 0 then
-                            error("bad argument #1 to 'getfenv' (invalid level)", 0)
-                        else
-                            local idx = fi - lvl + 1
-                            if idx < 1 then
-                                error("bad argument #1 to 'getfenv' (invalid level)", 0)
-                            end
-                            r = frames[idx].env
-                        end
-                    elseif type(arg) == "function" then
-                        local inf = closure_info[arg]
-                        if inf then
-                            r = get_closure_env(arg)
-                        else
-                            error("getfenv: native function environments are disabled", 0)
-                        end
-                    else
-                        error("bad argument #1 to 'getfenv' (number or function expected)", 0)
-                    end
+                    local arg = (nargs == 0) and 1 or S[fpos + 1]
+                    local r = sandbox_getfenv(arg, e, frames, fi)
                     top = ret_sp
                     if nres ~= 0 then
                         top = top + 1
@@ -1885,49 +1985,9 @@ run_closure = function(fn, trace, ...)
                     if nargs < 2 then
                         error("bad argument count to 'setfenv'", 0)
                     end
-                    local target = S[fpos + 1]
-                    local newenv = S[fpos + 2]
-                    if type(newenv) ~= "table" then
-                        error("bad argument #2 to 'setfenv' (table expected)", 0)
-                    end
-                    local r
-                    if type(target) == "number" then
-                        local lvl = target
-                        if lvl <= 0 then
-                            error("cannot change environment of thread", 0)
-                        end
-                        local idx = fi - lvl + 1
-                        if idx < 1 then
-                            error("invalid level", 0)
-                        end
-                        local fr = frames[idx]
-                        set_closure_env(fr.cl, newenv)
-                        for j = 1, fi do
-                            if frames[j].cl == fr.cl then
-                                frames[j].env = newenv
-                                if j == fi then
-                                    e = newenv
-                                end
-                            end
-                        end
-                        r = fr.cl
-                    elseif type(target) == "function" then
-                        if closure_info[target] then
-                            set_closure_env(target, newenv)
-                            for j = 1, fi do
-                                if frames[j].cl == target then
-                                    frames[j].env = newenv
-                                    if j == fi then
-                                        e = newenv
-                                    end
-                                end
-                            end
-                        else
-                            error("setfenv: native function environments are disabled", 0)
-                        end
-                        r = target
-                    else
-                        error("bad argument #1 to 'setfenv' (number or function expected)", 0)
+                    local r, new_e = sandbox_setfenv(S[fpos + 1], S[fpos + 2], frames, fi)
+                    if new_e then
+                        e = new_e
                     end
                     top = ret_sp
                     if nres ~= 0 then
@@ -1969,7 +2029,10 @@ run_closure = function(fn, trace, ...)
                     local target = S[fpos + 1]
                     local tr = {}
                     local rs = protected_call(f == xpcall, target,
-                        S[fpos + 2], tr, active_trace, S, fpos, top)
+                        S[fpos + 2], tr, active_trace, S, fpos, top, e, frames, fi)
+                    if rs.new_e then
+                        e = rs.new_e
+                    end
                     top = ret_sp
                     if nres == 0 then
                         -- discard all results

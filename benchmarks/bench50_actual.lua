@@ -1,25 +1,35 @@
 --[[
   50-case head-to-head benchmark: GoogiVM vs FiOne vs native LuaJIT.
 
-  Requirements
-  ------------
-  * LuaJIT (or Lua 5.1) to run this script.
-  * A FiOne checkout:      FIONE_PATH=/path/to/FiOne/source.lua
-  * A Lua 5.1 compiler:    LUAC_DIR=/path/to/dir/with/luac5.1
-    (`LUAC_DIR` must contain luac5.1.exe on Windows or luac5.1 on POSIX;
-    the working directory is switched there because the Windows build ships a
-    side-by-side CRT manifest.)
-
-  Defaults match the author's environment and can be overridden through the
-  environment or the command line:
+  Run this from the repository root so that `custom_loadstring_full.lua`
+  resolves next to it:
 
       luajit benchmarks/bench50_actual.lua [fione_path] [luac_dir] [work_dir]
 
-  Outputs (written next to the repository root)
-  ---------------------------------------------
+  Requirements
+  ------------
+  * LuaJIT (or Lua 5.1) to run this script.
+  * A FiOne checkout          -- fione_path, or FIONE_PATH, or ./FiOne/source.lua
+  * A Lua 5.1 compiler        -- luac_dir, or LUAC_DIR, or the current directory
+    The directory must contain `luac5.1.exe` on Windows or `luac5.1` on POSIX.
+    It is entered before each compile because the Windows build ships a
+    side-by-side CRT manifest and only resolves it from its own directory.
+
+  Every argument can also be supplied through the environment (`FIONE_PATH`,
+  `LUAC_DIR`, `BENCH_DIR`); command-line arguments win.
+
+  Outputs
+  -------
+  `work_dir` (default `bench50-work`, created if missing) receives the
+  intermediate `.lua`/`.luac` pairs. The three result files are written to the
+  current directory:
+
       BENCHMARK_50.md        report with medians, ratios and aggregates
       BENCHMARK_50.csv       per-case medians / best / reps
-      BENCHMARK_50_raw.csv   every individual sample (7 per case per engine, untracked)
+      BENCHMARK_50_raw.csv   every individual sample (7 per case per engine)
+
+  Point `work_dir` at a scratch directory, not at the repository, if you do not
+  want the intermediates to show up as untracked files.
 
   The timed region is execution only: FiOne bytecode compilation and GoogiVM
   source compilation are outside the timer.
@@ -27,23 +37,68 @@
 
 local unpack = unpack or table.unpack
 
-local FIONE_PATH = os.getenv("FIONE_PATH")
+local FS = package.config or "/"
+local DIRSEP = FS:sub(1, 1)
+local IS_WINDOWS = DIRSEP == "\\"
+
+local function fail(msg)
+    io.stderr:write("bench50: " .. msg .. "\n")
+    os.exit(1)
+end
+
+local function current_dir()
+    local handle = io.popen and io.popen(IS_WINDOWS and "cd" or "pwd")
+    if not handle then return nil end
+    local dir = handle:read("*l")
+    handle:close()
+    return dir and (dir:gsub("[\r\n]+$", "")) or nil
+end
+
+local function absolute(path)
+    if path:match("^%a:[/\\]") or path:sub(1, 1) == "/" then return path end
+    local base = current_dir()
+    if not base then return path end
+    return base .. DIRSEP .. path
+end
+
+local FIONE_PATH = absolute(os.getenv("FIONE_PATH")
     or (arg and arg[1])
-    or [[C:\Users\Googi\AppData\Local\Temp\opencode\FiOne\source.lua]]
-local LUAC_DIR = os.getenv("LUAC_DIR")
+    or ("FiOne" .. DIRSEP .. "source.lua"))
+local LUAC_DIR = absolute(os.getenv("LUAC_DIR")
     or (arg and arg[2])
-    or [[C:\Users\Googi\AppData\Local\Temp\opencode\lua515]]
-local WORK_DIR = os.getenv("BENCH_DIR")
+    or ".")
+local WORK_DIR = absolute(os.getenv("BENCH_DIR")
     or (arg and arg[3])
-    or [[C:\Users\Googi\AppData\Local\Temp\opencode\bench50]]
+    or "bench50-work")
 
 local SAMPLES = 7
 local MIN_SAMPLE = 0.02
 
+if not io.open(FIONE_PATH, "rb") then
+    fail("cannot open the FiOne source at '" .. FIONE_PATH .. "'.\n" ..
+        "  Pass the path to FiOne/source.lua as the first argument or in FIONE_PATH.")
+end
+
+local LUAC_BIN = "luac5.1" .. (IS_WINDOWS and ".exe" or "")
+do
+    local probe = io.open(LUAC_DIR .. DIRSEP .. LUAC_BIN, "rb")
+    if not probe then
+        fail("cannot find " .. LUAC_BIN .. " in '" .. LUAC_DIR .. "'.\n" ..
+            "  Pass the directory that contains the Lua 5.1 compiler as the second argument or in LUAC_DIR.")
+    end
+    probe:close()
+end
+
+WORK_DIR = WORK_DIR:gsub("[/\\]+$", "")
+
 local ours = assert(dofile("custom_loadstring_full.lua"))
 local FiOne = assert(dofile(FIONE_PATH))
 
-os.execute('if not exist "' .. WORK_DIR .. '" mkdir "' .. WORK_DIR .. '" >nul 2>nul')
+if IS_WINDOWS then
+    os.execute('if not exist "' .. WORK_DIR .. '" mkdir "' .. WORK_DIR .. '" >nul 2>nul')
+else
+    os.execute('mkdir -p "' .. WORK_DIR .. '"')
+end
 
 local cases = {
     { "loop_sum_100k", "local s=0; for i=1,100000 do s=s+i end; return s" },
@@ -147,14 +202,21 @@ end
 local fi_counter = 0
 local function compile_fione(src)
     fi_counter = fi_counter + 1
-    local stem = WORK_DIR .. "\\case" .. string.format("%02d", fi_counter)
+    local stem = WORK_DIR .. DIRSEP .. "case" .. string.format("%02d", fi_counter)
     local srcpath = stem .. ".lua"
     local bcpath = stem .. ".luac"
     write_file(srcpath, src)
-    local cmd = 'cd /d "' .. LUAC_DIR .. '" && luac5.1.exe -o "' ..
-        bcpath .. '" "' .. srcpath .. '"'
-    local code = os.execute(cmd)
-    assert(code == 0, "luac failed: " .. cmd)
+    local cmd
+    if IS_WINDOWS then
+        cmd = 'cd /d "' .. LUAC_DIR .. '" && ' .. LUAC_BIN .. ' -o "' ..
+            bcpath .. '" "' .. srcpath .. '"'
+    else
+        cmd = 'cd "' .. LUAC_DIR .. '" && ' .. LUAC_BIN .. ' -o "' ..
+            bcpath .. '" "' .. srcpath .. '"'
+    end
+    local status = os.execute(cmd)
+    local ok = (status == 0) or (status == true)
+    assert(ok, "luac failed: " .. cmd)
     local proto = FiOne.bc_to_state(read_file(bcpath))
     return FiOne.wrap_state(proto, make_env())
 end

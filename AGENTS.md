@@ -58,7 +58,7 @@ LuaJIT is the primary target. Lua 5.4 is a compatibility smoke run; some `setfen
 
 Expected baseline:
 
-- LuaJIT: 18,705 checks, 0 failed.
+- LuaJIT: 18,711 checks, 0 failed.
 - Lua 5.4: 18,687 checks, 0 failed.
 
 If `luajit` is unavailable in the environment, run the Lua suite and report that the primary host was not tested.
