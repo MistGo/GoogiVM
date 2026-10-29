@@ -25,6 +25,7 @@ local str_match = string.match
 local str_sub = string.sub
 local str_byte = string.byte
 local str_char = string.char
+local str_gsub = string.gsub
 local tconcat = table.concat
 local tostring = tostring
 local tonumber = tonumber
@@ -130,6 +131,7 @@ local FOP = {
 }
 
 local run_closure
+local active_trace = nil
 
 -- LuaJIT 2.1 can intermittently miscompile the base comparison path inside
 -- the large VM function. Keeping comparisons in a tiny, non-JIT function is
@@ -153,8 +155,109 @@ if type(jit) == "table" and jit.off then
     jit.off(compare_op)
 end
 
-local function format_runtime_error(err, trace)
-    if type(err) ~= "string" or not trace or not trace.cur then
+-- Messages already carrying a sandbox location are prefixed with this byte so
+-- nested handlers do not re-prefix them. It is stripped at every boundary the
+-- guest or the host can observe.
+local LOCATION_MARK = "\1"
+
+local function clean_error(err)
+    if type(err) == "string" and str_sub(err, 1, 1) == LOCATION_MARK then
+        return str_sub(err, 2)
+    end
+    return err
+end
+
+local function sandbox_message(err)
+    if type(err) ~= "string" then
+        return err
+    end
+    if str_sub(err, 1, 1) == LOCATION_MARK then
+        return str_sub(err, 2)
+    end
+    -- Drop a host location prefix ("file.lua:12: " or "C:\...\vm.lua:12: ")
+    -- without inventing a sandbox location.
+    local body = str_match(err, "^.-:%d+: ([^\n]*)")
+    return body or err
+end
+
+local last_native_fn = nil
+local native_name_cache = setmetatable({}, { __mode = "k" })
+
+local function native_name_of(fn, env)
+    if type(fn) ~= "function" or type(env) ~= "table" then
+        return nil
+    end
+    local name = native_name_cache[fn]
+    if name then
+        return name
+    end
+    for k, v in pairs(env) do
+        if v == fn then
+            if type(k) == "string" then
+                name = k
+                break
+            end
+        elseif type(v) == "table" then
+            for k2, v2 in pairs(v) do
+                if v2 == fn and type(k2) == "string" then
+                    name = k2
+                    break
+                end
+            end
+            if name then
+                break
+            end
+        end
+    end
+    if name then
+        native_name_cache[fn] = name
+    end
+    return name
+end
+
+local function append_trace(out, trace, head)
+    local frames = trace.frames
+    local fi = trace.fi
+    if frames and fi and fi > 1 then
+        local skipped_head = false
+        for i = fi - 1, 1, -1 do
+            local fr = frames[i]
+            if fr then
+                local fp = fr.p
+                local fl = fr.line
+                if not fl then
+                    local fpc = fr.pc or 1
+                    fl = fp.lines and fp.lines[fpc]
+                end
+                if fl then
+                    local tag = (fp.sourceName or "<string>") .. ":" .. fl
+                    if not skipped_head and tag == head then
+                        -- The header already points at this frame (for
+                        -- example error("m", 2) blaming the caller).
+                        skipped_head = true
+                    else
+                        out = out .. "\n  at " .. tag
+                    end
+                end
+            end
+        end
+    end
+    return out
+end
+
+local function format_runtime_error(err, trace, with_trace)
+    if type(err) ~= "string" then
+        return err
+    end
+    if str_sub(err, 1, 1) == LOCATION_MARK then
+        local out = str_sub(err, 2)
+        if with_trace and trace and trace.cur then
+            local head = str_match(out, "^([^\n]*):%d+: ")
+            out = append_trace(out, trace, head)
+        end
+        return out
+    end
+    if not trace or not trace.cur then
         return err
     end
     local p = trace.cur.p
@@ -168,25 +271,84 @@ local function format_runtime_error(err, trace)
     -- "C:\mods\vm.lua:1771: ..."). Replace that with the interpreted source
     -- location so host paths never leak into the sandbox.
     local msg = str_match(err, "^.-:%d+: ([^\n]*)") or err
-    local out = (p.sourceName or "<string>") .. ":" .. line .. ": " .. msg
 
-    local frames = trace.frames
-    local fi = trace.fi
-    if frames and fi and fi > 1 then
-        for i = fi - 1, 1, -1 do
-            local fr = frames[i]
-            if fr then
-                local fp = fr.p
-                local fpc = fr.pc or 1
-                local fl = fp.lines and fp.lines[fpc]
-                if fl then
-                    out = out .. "\n  at " ..
-                        (fp.sourceName or "<string>") .. ":" .. fl
-                end
-            end
+    -- Host argument errors name the dispatcher local `f` (or `?` when the
+    -- function was called through pcall); restore the real name if known.
+    if last_native_fn and
+       (str_find(msg, "to 'f'", 1, true) or str_find(msg, "to '?'", 1, true)) then
+        local name = native_name_of(last_native_fn, trace.cur.env)
+        if name then
+            msg = str_gsub(msg, "to 'f'", "to '" .. name .. "'", 1)
+            msg = str_gsub(msg, "to '%?'", "to '" .. name .. "'", 1)
         end
     end
+
+    local out = (p.sourceName or "<string>") .. ":" .. line .. ": " .. msg
+
+    if with_trace ~= false then
+        out = append_trace(out, trace, (p.sourceName or "<string>") .. ":" .. line)
+    end
     return out
+end
+
+local function sandbox_error(err, trace, with_trace)
+    local formatted = format_runtime_error(err, trace, with_trace)
+    if formatted ~= err then
+        return formatted
+    end
+    return sandbox_message(err)
+end
+
+-- Kept outside run_closure so the dispatch loop stays small enough for the
+-- LuaJIT trace compiler.
+local function protected_call(is_xpcall, target, handler, tr, outer_trace,
+                              S, fpos, top)
+    local target_info = closure_info[target]
+    local te = target_info and tr or outer_trace
+    local rs
+    if not is_xpcall then
+        if target_info then
+            rs = pack(pcall(run_closure, target, tr, unpack(S, fpos + 2, top)))
+        else
+            last_native_fn = target
+            rs = pack(pcall(target, unpack(S, fpos + 2, top)))
+        end
+        if not rs[1] then
+            rs[2] = sandbox_error(rs[2], te, false)
+        end
+        return rs
+    end
+
+    local args = { n = 0 }
+    local n = 0
+    for j = fpos + 3, top do
+        n = n + 1
+        args[n] = S[j]
+    end
+    args.n = n
+
+    local function finish(err)
+        local msg = sandbox_error(err, te, false)
+        if handler == nil then
+            return msg
+        end
+        if closure_info[handler] then
+            return run_closure(handler, {}, msg)
+        end
+        return handler(msg)
+    end
+
+    if target_info then
+        rs = pack(xpcall(function()
+            return run_closure(target, tr, unpack(args, 1, n))
+        end, finish))
+    else
+        last_native_fn = target
+        rs = pack(xpcall(function()
+            return target(unpack(args, 1, n))
+        end, finish))
+    end
+    return rs
 end
 
 local function make_closure(proto, upvals, fenv, set_native_env)
@@ -200,7 +362,7 @@ local function make_closure(proto, upvals, fenv, set_native_env)
         if result[1] then
             return unpack(result, 2, result.n)
         end
-        error(format_runtime_error(result[2], trace), 0)
+        error(sandbox_error(result[2], trace, true), 0)
     end
     local env = fenv or proto.env
     local native_env = false
@@ -242,6 +404,7 @@ end
 
 run_closure = function(fn, trace, ...)
     trace = trace or {}
+    active_trace = trace
     local LOADK, LOADBOOL, LOADNIL = 1, 2, 3
     local GETLOCAL, SETLOCAL, GETCELL, SETCELL, CELL = 4, 5, 6, 7, 8
     local GETUPVAL, SETUPVAL, GETGLOBAL, SETGLOBAL = 9, 10, 11, 12
@@ -349,6 +512,7 @@ run_closure = function(fn, trace, ...)
     local cur = {
         p = p, ups = info.u, base = base, pc = 1,
         ret_sp = 0, wanted = -1, va = va, env = cenv, cl = fn,
+        line = nil,
     }
     frames[1] = cur
     trace.p = p
@@ -473,6 +637,7 @@ run_closure = function(fn, trace, ...)
                                 S[fpos + j - 1] = nil
                             end
                             cur.pc = pc + 16
+                            cur.line = p.lines and p.lines[pc]
                             frames[fi] = cur
                             local nfree = free_frame_count
                             local frame
@@ -492,6 +657,7 @@ run_closure = function(fn, trace, ...)
                             frame.va = nil
                             frame.env = mci.env
                             frame.cl = mm
+                            frame.line = nil
                             cur = frame
                             fi = fi + 1
                             frames[fi] = cur
@@ -1639,9 +1805,11 @@ run_closure = function(fn, trace, ...)
                     cur.va = cva
                     cur.env = cenv
                     cur.cl = f
+                    cur.line = nil
                     frames[fi] = cur
                 else
                     cur.pc = pc + 4
+                    cur.line = p.lines and p.lines[pc]
                     frames[fi] = cur
                     local nfree = free_frame_count
                     local frame
@@ -1661,6 +1829,7 @@ run_closure = function(fn, trace, ...)
                     frame.va = cva
                     frame.env = cenv
                     frame.cl = f
+                    frame.line = nil
                     cur = frame
                     fi = fi + 1
                     frames[fi] = cur
@@ -1776,39 +1945,38 @@ run_closure = function(fn, trace, ...)
                             S[top] = nil
                         end
                     end
+                elseif f == error then
+                    -- Reimplement `error(msg, level)` against interpreted
+                    -- frames so `level` selects the right sandbox location.
+                    local msg = S[fpos + 1]
+                    local level = S[fpos + 2]
+                    if type(msg) ~= "string" then
+                        error(msg, 0)
+                    end
+                    if type(level) ~= "number" then
+                        level = 1
+                    end
+                    if level == 0 then
+                        error(LOCATION_MARK .. msg, 0)
+                    end
+                    local idx = fi - level + 1
+                    local fr = (idx >= 1) and frames[idx] or nil
+                    local fl = fr and (idx == fi and p.lines and p.lines[pc] or fr.line)
+                    if fl then
+                        error(LOCATION_MARK ..
+                            (fr.p.sourceName or "<string>") .. ":" .. fl ..
+                            ": " .. msg, 0)
+                    end
+                    error(LOCATION_MARK .. msg, 0)
                 elseif (f == pcall or (xpcall and f == xpcall)) and
-                       nargs >= 1 and closure_info[S[fpos + 1]] then
-                    -- Guest pcall/xpcall around an interpreted closure must not
-                    -- leak host paths: run the target ourselves so the error
-                    -- keeps the sandbox sourceName:line format and trace.
+                       nargs >= 1 then
+                    -- Guest pcall/xpcall must not leak host paths, whether the
+                    -- target is interpreted or a native function that calls
+                    -- back into interpreted callbacks (sort/gsub comparators).
                     local target = S[fpos + 1]
                     local tr = {}
-                    local rs
-                    if f == pcall then
-                        rs = pack(pcall(run_closure, target, tr,
-                            unpack(S, fpos + 2, top)))
-                        if not rs[1] then
-                            rs[2] = format_runtime_error(rs[2], tr)
-                        end
-                    else
-                        local handler = S[fpos + 2]
-                        local args = {}
-                        for j = fpos + 3, top do
-                            args[#args + 1] = S[j]
-                        end
-                        rs = pack(xpcall(function()
-                            return run_closure(target, tr, unpack(args))
-                        end, function(err)
-                            local msg = format_runtime_error(err, tr)
-                            if handler == nil then
-                                return msg
-                            end
-                            if closure_info[handler] then
-                                return run_closure(handler, {}, msg)
-                            end
-                            return handler(msg)
-                        end))
-                    end
+                    local rs = protected_call(f == xpcall, target,
+                        S[fpos + 2], tr, active_trace, S, fpos, top)
                     top = ret_sp
                     if nres == 0 then
                         -- discard all results
@@ -1827,6 +1995,7 @@ run_closure = function(fn, trace, ...)
                         top = ret_sp + nres
                     end
                 else
+                    last_native_fn = f
                     if nres == 0 then
                         if nargs == 0 then
                             f()
@@ -1923,6 +2092,7 @@ run_closure = function(fn, trace, ...)
             frames[fi] = nil
             fi = fi - 1
             if fi == 0 then
+                active_trace = nil
                 if top == 0 then
                     return
                 end

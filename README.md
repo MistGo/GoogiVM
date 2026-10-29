@@ -131,7 +131,9 @@ All limits are enabled by default and can be customized per chunk or disabled in
 ## Host-dependent semantics
 
 GoogiVM implements the Lua 5.1 **language**, but a few behaviors are defined by
-the host runtime and are inherited rather than re-implemented:
+the host runtime and are inherited rather than re-implemented. They are listed
+below so that "Lua 5.1 compatible" is not read as "host-independent standard
+library":
 
 | Area | Behavior |
 |---|---|
@@ -169,16 +171,36 @@ Measured directly inside **Scrap Mechanic** with [`benchmarks/benchmark11.lua`](
 | **Total (All 11 cases)** | **12.217 s** | **27.653 s** | **24.991 s** | — | **2.05–2.26x faster** | — |
 | **Total (10 shared cases)** | **12.082 s** | **27.448 s** | **24.806 s** | **18.863 s** | **2.05–2.27x faster** | **1.56x faster** |
 
+These are **transcribed in-game console logs**, not CI artifacts: Scrap Mechanic
+cannot be scripted from this repository. The verbatim transcripts and the
+reproduction steps are in [`benchmarks/in-game/README.md`](benchmarks/in-game/README.md).
+Single session, single machine; treat sub-5% differences as noise.
+
+SComputers reports only 10 cases: its sandbox does not expose table metatables,
+so `100k metatable adds` is missing and its total is not comparable with the
+11-case totals. GoogiVM is compared against it on the 10 shared cases only.
+
 ### 2. 50-Case Head-to-Head Suite (`BENCHMARK_50.md`)
 
 Across 50 diverse microbenchmarks comparing **GoogiVM** against upstream **FiOne** (`SovereignSatellite/FiOne` running precompiled `luac5.1` bytecode):
 
-- **32 wins**, **14 losses**, **4 near-ties** (within 5%).
-- **2.69x faster by total median execution time** (`1.9636 s` vs `5.2825 s`).
-- **1.30x geometric mean speedup** across all 50 workloads.
-- Massive gains on calls (`2.6–3.2x`), closures/upvalues (`2.7–6.2x`), tail/mutual recursion (`2.7–4.8x`), `ipairs`/`pairs` (`1.3–1.7x`), and metamethods (`3.8x`).
+- **28 wins**, **19 losses**, **3 near-ties** (within 5%).
+- **2.32x faster by total median execution time** (`1.9956 s` vs `4.6318 s`).
+- **1.21x geometric mean speedup** across all 50 workloads.
 
-See [`BENCHMARK_50.md`](BENCHMARK_50.md) and [`BENCHMARK_50.csv`](BENCHMARK_50.csv) for the full 50-case breakdown.
+Per-category median ratios from [`BENCHMARK_50.csv`](BENCHMARK_50.csv), including the losses:
+
+| Category | FiOne / GoogiVM | Notes |
+|---|---:|---|
+| Function calls | 2.39x - 3.10x | includes `method_call_100k` (2.49x) |
+| Closures / upvalues | 0.32x - 5.23x | `closure_upvalue_1m` 5.23x, but `closure_loop_capture_100k` 0.32x and `closures_create_100k` 0.67x |
+| Recursion (incl. tail) | 1.08x - 5.26x | `recursion_fact_10` 1.08x, `tail_recursion_1000` 5.26x |
+| `ipairs` / `pairs` / `next` | 0.84x - 2.30x | `generic_next_100k` 0.84x |
+| Metatables | 4.04x | `metatable_add_100k` |
+
+These ranges are taken directly from the CSV; the geometric mean of **1.21x** is the honest aggregate because the suite still contains real losses. Every individual sample (7 per case per engine) is in [`BENCHMARK_50_raw.csv`](BENCHMARK_50_raw.csv), and [`benchmarks/bench50_actual.lua`](benchmarks/bench50_actual.lua) regenerates all three artifacts.
+
+See [`BENCHMARK_50.md`](BENCHMARK_50.md), [`BENCHMARK_50.csv`](BENCHMARK_50.csv) and [`BENCHMARK_50_raw.csv`](BENCHMARK_50_raw.csv) (every individual sample) for the full breakdown.
 
 ---
 
@@ -214,8 +236,8 @@ lua run_all_tests.lua
 ```
 
 Expected output:
-- **LuaJIT 2.1:** `TOTAL: 18691 checks, 0 failed`
-- **Lua 5.4:** `TOTAL: 18673 checks, 0 failed`
+- **LuaJIT 2.1.1720049189:** `TOTAL: 18705 checks, 0 failed`
+- **Lua 5.4.6:** `TOTAL: 18687 checks, 0 failed`
 
 See [`tests/README.md`](tests/README.md) for a description of all 17 test modules.
 
@@ -247,8 +269,9 @@ custom_loadstring_full.lua   # GoogiVM (compiler, optimizer, and VM in one file)
 README.md                    # Project overview, API, and benchmark summary
 TECHNICAL.md                 # Internal architecture and opcode reference
 BENCHMARK_50.md              # 50-case benchmark report (GoogiVM vs FiOne)
-BENCHMARK_50.csv             # Raw benchmark data
-benchmarks/                  # Reproducible 11-case harness + raw artifacts
+BENCHMARK_50.csv             # Per-case medians, bests and repetition counts
+BENCHMARK_50_raw.csv         # Every individual sample (7 per case per engine)
+benchmarks/                  # Reproducible harnesses (11-case, 50-case) + logs
 run_all_tests.lua            # Automated test runner
 tests/                       # 17 test modules + test suite documentation
 AGENTS.md                    # Guidelines and invariants for AI coding agents

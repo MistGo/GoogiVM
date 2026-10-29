@@ -1,18 +1,18 @@
 # Benchmarks
 
-This directory contains the reproducible benchmark harness for **GoogiVM**.
+Two reproducible harnesses live here.
 
-## `benchmark11.lua`
+## `benchmark11.lua` — 11 in-game micro-cases
 
-An autonomous Lua 5.1 script that measures the 11 standard micro-cases used for
-the in-game Scrap Mechanic comparison.
+An autonomous Lua 5.1 script that measures the 11 cases used for the in-game
+Scrap Mechanic comparison.
 
 It reports:
 
 - per-case median / best / worst wall-clock time,
 - **sum of medians** (dominated by the slowest case),
 - **geometric mean** of medians (weights all cases equally),
-- optional baseline ratios (geometric mean, arithmetic mean, and total).
+- optional baseline ratios (geometric mean, arithmetic mean, total).
 
 It writes two artifacts when `io` is available:
 
@@ -20,8 +20,6 @@ It writes two artifacts when `io` is available:
 - `benchmark11_<label>_raw.txt` — the complete raw console log.
 
 ### Desktop usage
-
-Run from the repository root:
 
 ```bash
 # Measure the local GoogiVM
@@ -43,22 +41,52 @@ Modes:
 | `vm` / `sandbox` | the sandbox-provided `loadstring` |
 | `native` / `host` | the host `loadstring` with `setfenv` |
 
-The harness raises `maxInstructions`, `maxCallDepth`, and `maxStack` to
-`math.huge` for GoogiVM runs so a quota never truncates a measurement.
+GoogiVM runs are given `maxInstructions/maxCallDepth/maxStack = math.huge` so a
+quota never truncates a measurement.
 
 ### In-game usage (Scrap Mechanic / ScrapComputers)
 
-Paste the whole file into a computer's `Main.lua` and run it. Inside the
-sandbox `loadstring` compiles with whichever VM is active, so the **same**
-script measures GoogiVM and the original FiOne when you flip
-`GOOGI_USE_CUSTOM_VM` in `Scripts/GoogiVMConfig.lua`.
+Paste the whole file into a computer's `Main.lua` and run it. Inside the sandbox
+`loadstring` compiles with whichever VM is active, so the **same** script
+measures GoogiVM and the original FiOne when you flip `GOOGI_USE_CUSTOM_VM`.
 
-The file is console-only there (no `io`), which is expected: copy the printed
-table into a spreadsheet or into the report.
+Requirements inside the game sandbox:
 
-## `bench50_actual.lua` (workspace only)
+| Global | Why | If missing |
+|---|---|---|
+| `loadstring` | compiles the cases with the active VM | hard error with a clear message |
+| `os.clock` | timing | the script refuses to guess; install a clock |
+| `print` | console output | nothing is displayed |
+| `setmetatable`, `select`, `math`, `string`, `table` | used by the cases | the affected case reports a runtime error |
 
-The 50-case head-to-head suite that produced [`../BENCHMARK_50.md`](../BENCHMARK_50.md)
-and [`../BENCHMARK_50.csv`](../BENCHMARK_50.csv). It requires an external Lua
-5.1 compiler and a local FiOne checkout, so it is not shipped in this
-repository.
+The script tolerates a stripped sandbox: it never touches `_G`, `io`, `arg`,
+`dofile`, `setfenv`, `rawget`, or `getmetatable` unconditionally, and it skips
+file output when `io` is absent.
+
+In-game evidence from the reference sessions is transcribed in
+[`in-game/README.md`](in-game/README.md).
+
+## `bench50_actual.lua` — 50-case head-to-head
+
+Generates [`../BENCHMARK_50.md`](../BENCHMARK_50.md),
+[`../BENCHMARK_50.csv`](../BENCHMARK_50.csv) and
+[`../BENCHMARK_50_raw.csv`](../BENCHMARK_50_raw.csv) (every sample).
+
+Requirements (not shipped here):
+
+- a FiOne checkout (`FIONE_PATH=/path/to/FiOne/source.lua`),
+- a Lua 5.1 compiler (`LUAC_DIR=/path/to/dir/containing/luac5.1`).
+
+```bash
+FIONE_PATH=/path/to/FiOne/source.lua \
+LUAC_DIR=/path/to/lua515 \
+luajit benchmarks/bench50_actual.lua
+```
+
+On Windows the compiler directory is entered with `cd /d` before invoking
+`luac5.1.exe`, which is required because that build ships a side-by-side CRT
+manifest.
+
+The harness times execution only: FiOne bytecode compilation and GoogiVM source
+compilation are outside the timer. JIT traces are flushed before each
+engine/case measurement.

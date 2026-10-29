@@ -127,6 +127,111 @@ return ok, msg
         P(true, 1, 2))
     t:expect("local ok, v = pcall(string.upper, 'abc'); return ok, v", P(true, "ABC"))
 
+    -- Native targets with guest callbacks must not leak host paths.
+    do
+        local chunk = assert(t.custom([[
+local ok, e = pcall(table.sort, {3, 1, 2}, function(a, b) error("cmp") end)
+return ok, e
+]], t.env, { sourceName = "native.lua" }))
+        local ran, gok, gerr = pcall(chunk)
+        t:check(ran and gok == false and type(gerr) == "string",
+            "native-target pcall shape: " .. tostring(gerr))
+        t:check(type(gerr) == "string" and gerr:find("native.lua:", 1, true) ~= nil,
+            "native-target pcall location: " .. tostring(gerr))
+        t:check(type(gerr) == "string" and
+            gerr:find("custom_loadstring_full", 1, true) == nil,
+            "native-target pcall must not leak host paths: " .. tostring(gerr))
+    end
+
+    do
+        local chunk = assert(t.custom([[
+local ok, e = pcall(string.gsub, "abc", "%a", function(c) error("gsub") end)
+return ok, e
+]], t.env, { sourceName = "gsub.lua" }))
+        local ran, gok, gerr = pcall(chunk)
+        t:check(ran and gok == false and type(gerr) == "string" and
+            gerr:find("gsub.lua:", 1, true) ~= nil and
+            gerr:find("custom_loadstring_full", 1, true) == nil,
+            "gsub callback error: " .. tostring(gerr))
+    end
+
+    -- xpcall with a native target also hands the handler a sandbox message.
+    do
+        local chunk = assert(t.custom([[
+local ok, msg = xpcall(table.sort, function(m) return "H:" .. m end,
+    {3, 1, 2}, function(a, b) error("cmp2") end)
+return ok, msg
+]], t.env, { sourceName = "xpcall2.lua" }))
+        local ran, gok, gmsg = pcall(chunk)
+        t:check(ran and gok == false and type(gmsg) == "string" and
+            gmsg:find("H:xpcall2.lua:", 1, true) ~= nil and
+            gmsg:find("custom_loadstring_full", 1, true) == nil,
+            "xpcall native-target handler: " .. tostring(gmsg))
+    end
+
+    -- error(msg, level) must select the requested interpreted frame.
+    do
+        local src = [[
+local function a() error("lvl", LEVEL) end
+local function b()
+    a()
+end
+local ok, e = pcall(b)
+return ok, e
+]]
+        for level, want in pairs({ [0] = "lvl", [1] = "lvl.lua:1:", [2] = "lvl.lua:3:" }) do
+            local chunk = assert(t.custom(src:gsub("LEVEL", tostring(level)),
+                t.env, { sourceName = "lvl.lua" }))
+            local ran, gok, gerr = pcall(chunk)
+            t:check(ran and gok == false and type(gerr) == "string" and
+                gerr:find(want, 1, true) == 1,
+                "error level " .. level .. ": " .. tostring(gerr))
+        end
+    end
+
+    -- Uncaught traceback frames must point at the call lines, not the next one.
+    do
+        local chunk = assert(t.custom([[
+local function g() error("D") end
+local function f()
+  g()
+end
+local function h()
+  f()
+end
+h()
+]], t.env, { sourceName = "tb.lua" }))
+        local ran, gerr = pcall(chunk)
+        t:check(not ran and type(gerr) == "string" and
+            gerr:find("  at tb.lua:3", 1, true) ~= nil,
+            "traceback call site 1: " .. tostring(gerr))
+        t:check(not ran and type(gerr) == "string" and
+            gerr:find("  at tb.lua:6", 1, true) ~= nil,
+            "traceback call site 2: " .. tostring(gerr))
+        t:check(not ran and type(gerr) == "string" and
+            gerr:find("  at tb.lua:8", 1, true) ~= nil,
+            "traceback call site 3: " .. tostring(gerr))
+    end
+
+    -- Host argument errors report the real callee name, not the VM local `f`.
+    t:expect([[
+local ok, e = pcall(function() return string.rep(5) end)
+return ok, e:find("to 'rep'", 1, true) ~= nil and e:find("to 'f'", 1, true) == nil
+]], P(false, true))
+    t:expect([[
+local ok, e = pcall(function() return math.floor("x") end)
+return ok, e:find("to 'floor'", 1, true) ~= nil
+]], P(false, true))
+
+    -- Caught errors stay single-line, matching native pcall shape.
+    t:expect([[
+local ok, e = pcall(function()
+    local function g() error("nested") end
+    g()
+end)
+return ok, e:find("\n", 1, true) == nil
+]], P(false, true))
+
     -- Runtime error after partial side effects keeps the side effect.
     local env = {}
     local c = assert(t:compile("x = 1; return nil + 1", env))
