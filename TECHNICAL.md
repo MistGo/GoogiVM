@@ -99,6 +99,8 @@ All calls use `CALLD`:
 
 For a custom closure, the VM pushes a new explicit frame, shifts arguments into parameter slots, clears the callee's local registers, and continues the same dispatch loop. Custom-to-custom calls do not recurse through the host once per call.
 
+A `return f(...)` call is marked in the unused `C` operand of `CALLD`. For an interpreted target, the VM replaces the current frame instead of pushing a new one, carrying over `ret_sp` and `wanted`; for a native target, results are moved to the expression area and the following `RET` unwinds the current frame. This is tail-call optimization without changing the normal call protocol.
+
 Native functions use fast paths for 0/1/2 arguments and `unpack` for larger argument lists.
 
 ### Closures and multiple returns
@@ -161,9 +163,8 @@ Never fuse across a jump target and never skip a live instruction.
 
 ## Known limits
 
-- No tail-call optimization.
 - Wall-clock timeout and memory quota are not provided; instruction/call-depth/stack budgets are available, but external process isolation is still recommended.
 - No bytecode serialization.
 - No Lua 5.2+ grammar.
-- Deep recursion is bounded by `maxCallDepth` and the VM value stack; there is no tail-call reuse.
+- Non-tail recursion is bounded by `maxCallDepth` and the VM value stack; `return f(...)` reuses the current frame.
 - Behavior of `#` on sparse tables and some metamethod edge cases is host-defined.

@@ -53,7 +53,7 @@ return function(t)
     f = assert(custom([[
 local function f(n)
     if n == 0 then return 0 end
-    return f(n - 1)
+    return 1 + f(n - 1)
 end
 return f(100)
 ]], {}, { maxCallDepth = 20 }))
@@ -104,7 +104,8 @@ local function a()
     local function b()
         return nil + 1
     end
-    return b()
+    local x = b()
+    return x
 end
 return a()
 ]], {}, { sourceName = "trace.lua" }))

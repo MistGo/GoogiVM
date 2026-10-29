@@ -40,8 +40,9 @@ lua run_all_tests.lua
 | `test_fuzz.lua` | 15 000 случайных выражений и 3 000 случайных программ с дифференциальной проверкой против нативного `loadstring` |
 | `test_stress.lua` | рекурсия 5 000, 150 локальных, 100 upvalues, таблица на 1 000 элементов, 2 000 инструкций, цикл на 100 000, строки/комментарии 100 КБ, 200 вложенных блоков/скобок, 120 параметров, 100 возвратов, 100 замыканий |
 | `test_limits.lua` | отказ `getfenv`/`setfenv` для native-функций, лимиты исходника, байткода, инструкций, глубины вызовов, стека, аргументов и возвратов, sourceName, runtime line/traceback |
+| `test_tailcalls.lua` | tail recursion и mutual recursion с малым `maxCallDepth`, multi-return, native/method/vararg/table `__call`, non-tail return, ошибки и корутины |
 
-Итого: **18 661 проверка** на LuaJIT и **18 643 проверки** на Lua 5.4;
+Итого: **18 678 проверок** на LuaJIT и **18 660 проверок** на Lua 5.4;
 на 5.4 часть проверок `setfenv`/`getfenv` и `__len`-зависимостей
 автоматически пропускается.
 

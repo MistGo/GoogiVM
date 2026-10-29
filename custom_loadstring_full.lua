@@ -920,6 +920,7 @@ run_closure = function(fn, trace, ...)
         elseif op == CALLD then
             local mreg = C[pc + 1]
             local nres = C[pc + 2]
+            local tail = C[pc + 3] == 1
             local fpos = S[base + mreg - 1]
             local f = S[fpos]
             local nargs = top - fpos
@@ -934,7 +935,8 @@ run_closure = function(fn, trace, ...)
             end
 
             if fci then
-                if limits.maxCallDepth and fi >= limits.maxCallDepth then
+                if not tail and limits.maxCallDepth and
+                   fi >= limits.maxCallDepth then
                     error("call depth limit exceeded", 0)
                 end
                 local cp = fci.p
@@ -968,15 +970,23 @@ run_closure = function(fn, trace, ...)
                     cenv = getfenv(f)
                 end
 
-                cur.pc = pc + 4
-                frames[fi] = cur
+                local call_ret_sp = tail and cur.ret_sp or ret_sp
+                local call_wanted = tail and cur.wanted or nres
+                if not tail then
+                    cur.pc = pc + 4
+                    frames[fi] = cur
+                end
                 cur = {
                     p = cp, ups = cpups, base = fpos, pc = 1,
-                    ret_sp = ret_sp, wanted = nres, va = cva,
+                    ret_sp = call_ret_sp, wanted = call_wanted, va = cva,
                     env = cenv, cl = f,
                 }
-                fi = fi + 1
-                frames[fi] = cur
+                if tail then
+                    frames[fi] = cur
+                else
+                    fi = fi + 1
+                    frames[fi] = cur
+                end
                 trace.cur = cur
                 trace.fi = fi
 
@@ -1140,6 +1150,14 @@ run_closure = function(fn, trace, ...)
                             top = ret_sp + nres
                         end
                     end
+                end
+                if tail then
+                    local exprbase = base + maxreg
+                    local n = top - ret_sp
+                    for j = 1, n do
+                        S[exprbase + j - 1] = S[ret_sp + j]
+                    end
+                    top = exprbase + n - 1
                 end
                 pc = pc + 4
             end
@@ -2840,9 +2858,10 @@ local function custom_loadstring(source, env, opts)
                 end
             end
             if top_multi then
-                patch_nres(last_multi_pc, -1)
+                local multi_pc = last_multi_pc
+                patch_nres(multi_pc, -1)
                 clear_multi()
-                return -1
+                return -1, count, multi_pc
             end
             clear_multi()
             return count
@@ -3051,10 +3070,17 @@ local function custom_loadstring(source, env, opts)
 
         local function parse_return()
             advance()
-            local n = compile_exprlist_all()
+            local n, count, multi_pc = compile_exprlist_all()
             while accept(";") do end
             if not is_block_end() then
                 fail("'end' expected after return")
+            end
+            if n == -1 and count == 1 and multi_pc and
+               fc.code[multi_pc] == CALLD then
+                -- Mark this CALLD as a tail call. The VM reuses the current
+                -- frame for interpreted targets; native targets are called
+                -- normally and fall through to the RET below.
+                fc.code[multi_pc + 3] = 1
             end
             emit(RET, n, 0, 0)
         end

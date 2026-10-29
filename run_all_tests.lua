@@ -26,6 +26,7 @@ local modules = {
     "test_fuzz",
     "test_stress",
     "test_limits",
+    "test_tailcalls",
 }
 
 local grand_total = 0

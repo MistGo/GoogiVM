@@ -103,6 +103,7 @@ The compiler targets Lua 5.1:
 
 - `if`, `while`, `repeat`, numeric and generic `for`;
 - functions, closures, upvalues, varargs;
+- tail calls (`return f(...)`) with frame reuse;
 - tables, methods, multiple assignment, multiple returns;
 - all Lua 5.1 operators;
 - metatables through the host;
@@ -117,7 +118,7 @@ This is a sandbox-first interpreter, **not a hardened security boundary**.
 - The default instruction, call-depth, stack, argument, and return-value limits can be overridden through the options table.
 - There is no wall-clock timeout. For hostile code, use a separate process/worker with an external timeout.
 - There is no memory limit inside Lua.
-- Deep recursion is bounded by `maxCallDepth`, but there is still no tail-call optimization.
+- Non-tail recursion is bounded by `maxCallDepth`; tail calls reuse the current frame and do not grow the call stack.
 - Any host function you put in `env` can do whatever that function can do.
 - Do not expose `os`, `io`, `debug`, `package`, `loadstring`, or FFI to untrusted code.
 - `getfenv`/`setfenv` are special-cased for interpreted closures. Accessing native function environments is rejected.
@@ -140,14 +141,16 @@ lua run_all_tests.lua
 
 Expected results:
 
-- LuaJIT: **18,661 checks**, 0 failed;
-- Lua 5.4: **18,643 checks**, 0 failed (some `setfenv`/`getfenv`/`__len` checks are skipped).
+- LuaJIT: **18,678 checks**, 0 failed;
+- Lua 5.4: **18,660 checks**, 0 failed (some `setfenv`/`getfenv`/`__len` checks are skipped).
 
 The `tests/` directory is only for development; it is not needed to use the library. Detailed test coverage is in [`tests/README.md`](tests/README.md).
 
 ## Performance
 
 On the project microbenchmarks, this interpreter was about **1.6x faster than FiOne** overall after the peephole/superinstruction work. It is still much slower than native LuaJIT, which is a different execution model. These are microbenchmarks, not a representative game workload.
+
+Tail calls reuse the current VM frame, so `return f(...)` does not grow the call-depth budget or the frame stack.
 
 **LuaJIT 2.1 note:** the base comparison path runs through a small non-JIT helper, and fused comparison opcodes are disabled when a `jit` table is present. This avoids an intermittent LuaJIT miscompile observed under long differential-fuzz runs. Arithmetic and loop execution remain JIT-compiled.
 
