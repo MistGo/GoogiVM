@@ -1,24 +1,23 @@
 --[[
-  custom_loadstring_full.lua
-  Полный Lua 5.1-совместимый компилятор/интерпретатор на чистом Lua.
-  Без load/loadstring/ffi/debug/io/os.
+  GoogiVM (custom_loadstring_full.lua)
+  Pure-Lua Lua 5.1 compiler and bytecode interpreter.
+  Does not use load, loadstring, FFI, debug, io, or os.
 
   API:
     local custom_loadstring = dofile("custom_loadstring_full.lua")
-    local chunk, err = custom_loadstring(source, env)
+    local chunk, err = custom_loadstring(source, env, options)
 
-  Реализовано:
+  Supported:
     - while, repeat/until, numeric for, generic for
-    - varargs (...), nested functions, closures/upvalues
+    - varargs (...), nested functions, closures/upvalues, tail calls
     - table constructors (nested, named/keyed/list fields)
     - multiple assignment and multiple returns
     - method calls/definitions, local function
-    - all Lua 5.1 operators and native metamethod semantics
-    - error on syntax: nil, "syntax error ..."
+    - all Lua 5.1 operators and host metamethod semantics
+    - syntax and runtime errors with source-line mapping
 
-  Lua 5.1 не содержит побитовых операторов. Здесь реализованы все
-  реальные операторы 5.1; побитовые функции при необходимости передаются
-  через env (например, bit.band в LuaJIT).
+  Lua 5.1 does not include bitwise operators; expose a library such as
+  `bit` through `env` if needed.
 ]]
 
 local str_find = string.find
@@ -40,7 +39,6 @@ local setfenv = setfenv
 local getmetatable = getmetatable
 local next = next
 local ipairs = ipairs
-local rawget = rawget
 local ipairs_iter = ipairs and select(1, ipairs({}))
 local unpack = unpack or table.unpack
 
@@ -455,10 +453,10 @@ run_closure = function(fn, trace, ...)
                     if type(a) == "number" and type(b) == "number" then
                         S[dest] = S[dest] + (a + b)
                         pc = pc + 24
-                    else
+                    elseif getmetatable then
                         local mt = (type(a) == "table" and getmetatable(a)) or
                                    (type(b) == "table" and getmetatable(b))
-                        local mm = type(mt) == "table" and rawget(mt, "__add")
+                        local mm = type(mt) == "table" and mt.__add
                         local mci = mm and closure_info[mm]
                         if mci and not mci.p.isvararg then
                             local cp = mci.p
@@ -513,6 +511,9 @@ run_closure = function(fn, trace, ...)
                             S[dest] = S[dest] + (a + b)
                             pc = pc + 24
                         end
+                    else
+                        S[dest] = S[dest] + (a + b)
+                        pc = pc + 24
                     end
                 elseif bop == SUB then
                     S[dest] = S[dest] + (a - b)
@@ -704,7 +705,7 @@ run_closure = function(fn, trace, ...)
                 local f = S[r]
                 if f == ipairs_iter then
                     local idx = S[r + 2] + 1
-                    local val = rawget(S[r + 1], idx)
+                    local val = S[r + 1][idx]
                     if val ~= nil then
                         S[r + 2] = idx
                         if C[pc + 2] == 0 then
@@ -759,7 +760,7 @@ run_closure = function(fn, trace, ...)
                 local f = S[r]
                 if f == ipairs_iter then
                     local idx = S[r + 2] + 1
-                    local val = rawget(S[r + 1], idx)
+                    local val = S[r + 1][idx]
                     if val ~= nil then
                         S[r + 2] = idx
                         if C[pc + 2] == 0 then
@@ -2727,9 +2728,8 @@ local function custom_loadstring(source, env, opts)
         end
 
         -- ========================================================
-        -- Пост-компиляционный peephole: склеивает частые
-        -- последовательности в супер-опкоды. Код не сдвигается:
-        -- супер-опкод просто перепрыгивает "мёртвые" инструкции.
+        -- Post-compile peephole optimizer: fuses frequent instruction
+        -- sequences into superinstructions without shifting code.
         -- ========================================================
         local function optimize_code(co, n)
             local targets = {}
@@ -3633,7 +3633,7 @@ local function custom_loadstring(source, env, opts)
         end
 
         -- ========================================================
-        -- Табличные конструкторы
+        -- Table constructors
         -- ========================================================
         compile_table = function()
             local oldreg = fc.nextreg
@@ -3726,7 +3726,7 @@ local function custom_loadstring(source, env, opts)
         end
 
         -- ========================================================
-        -- Функции
+        -- Functions
         -- ========================================================
         compile_funcbody = function(implicit_self)
             local parent_fc = fc
@@ -3802,7 +3802,7 @@ local function custom_loadstring(source, env, opts)
         end
 
         -- ========================================================
-        -- Выражения-списки
+        -- Expression lists
         -- ========================================================
         local function compile_exprlist_assign(n)
             clear_multi()
@@ -3854,7 +3854,7 @@ local function custom_loadstring(source, env, opts)
         end
 
         -- ========================================================
-        -- Выражения в statement-позиции: assignment или call
+        -- Statement-level expressions: assignment or call
         -- ========================================================
         local function make_field_target(base_reg, key)
             return { kind = "field", base = base_reg, key = key }
@@ -3987,7 +3987,7 @@ local function custom_loadstring(source, env, opts)
         end
 
         -- ========================================================
-        -- Блоки и операторы
+        -- Blocks and statements
         -- ========================================================
         local function is_block_end()
             return tk == "eof" or tk == "end" or tk == "else" or

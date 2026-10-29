@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Short operating guide for AI coding agents working on **LuaSandbox VM**.
+Short operating guide for AI coding agents working on **GoogiVM**.
 
 ## What this project is
 
@@ -41,8 +41,8 @@ The test harness may use `loadstring`/`load`, `os.clock`, `print`, and `dofile`.
 | `run_all_tests.lua` | Test runner |
 | `tests/helpers.lua` | Shared test harness |
 | `tests/test_*.lua` | Test modules; `test_limits.lua` covers budgets and native-fenv rejection |
-| `README.md`, `README.ru.md` | User docs |
-| `TECHNICAL.md`, `TECHNICAL.ru.md` | Short implementation guide |
+| `README.md` | User docs |
+| `TECHNICAL.md` | Short implementation guide |
 | `LICENSE` | MIT |
 
 ## Commands
@@ -110,7 +110,7 @@ Preserve register-collision checks. Do not treat captured locals as plain regist
    - VM: `run_closure`;
    - API: `custom_loadstring`.
 4. Run both test commands.
-5. Update both language READMEs for user-facing changes.
+5. Update `README.md` for user-facing changes.
 6. Do not change the license without the maintainer's decision.
 
 ## Definition of done
@@ -121,7 +121,7 @@ Preserve register-collision checks. Do not treat captured locals as plain regist
 - [ ] `lua run_all_tests.lua` passes on Lua 5.4.
 - [ ] No new dependencies or forbidden host calls.
 - [ ] Peephole jump targets, dead slots, and skip lengths are correct.
-- [ ] Both READMEs updated if behavior changed.
+- [ ] `README.md` updated if behavior changed.
 
 ## License
 

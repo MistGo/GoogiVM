@@ -1,6 +1,6 @@
 # Technical overview
 
-This is a short implementation guide for LuaSandbox VM. For usage, see [`README.md`](README.md).
+This is a short implementation guide for **GoogiVM**. For usage, see [`README.md`](README.md).
 
 The whole runtime is in one file: `custom_loadstring_full.lua`. It contains the lexer, parser, bytecode emitter, peephole optimizer, and virtual machine.
 

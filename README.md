@@ -1,15 +1,13 @@
-# LuaSandbox VM
+# GoogiVM
 
-**A pure-Lua Lua 5.1 compiler and bytecode interpreter for hosts where `loadstring` is unavailable.**
-
-[English](README.md) | [Русский](README.ru.md)
+**A fast, pure-Lua Lua 5.1 compiler and bytecode interpreter for hosts where `loadstring` is unavailable.**
 
 ![Lua](https://img.shields.io/badge/Lua-5.1%20%7C%20LuaJIT-2C2D72)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-`custom_loadstring_full.lua` turns a Lua 5.1 source string into a callable function. It is one file, has no dependencies, and does not use `load`, `loadstring`, FFI, `debug`, `io`, or `os`.
+`custom_loadstring_full.lua` compiles a Lua 5.1 source string into a callable Lua function. It is a single self-contained file with zero external dependencies and does not use `load`, `loadstring`, FFI, `debug`, `io`, or `os`.
 
-It is intended for game mods, embedded runtimes, and small server-side sandboxes that need to run Lua source without access to the host loader.
+It is built for game mods (such as Scrap Mechanic), embedded runtimes, and sandboxed environments that need to execute Lua source code without access to the host loader.
 
 > **Only one file is needed to use the library:** `custom_loadstring_full.lua`. The `tests/` folder is for development and can be ignored by users.
 
@@ -148,22 +146,22 @@ The `tests/` directory is only for development; it is not needed to use the libr
 
 ## Performance
 
-On focused microbenchmarks, this interpreter is roughly **2-3x faster than FiOne** on call-heavy, numeric-loop, and Fibonacci workloads. Table reads/writes are roughly **1.6-1.9x faster**; branch-heavy loops are roughly at parity under LuaJIT because the ordering-comparison workaround keeps them out of the JIT. It is still much slower than native LuaJIT, which is a different execution model.
+On focused benchmarks and in-game Scrap Mechanic tests, **GoogiVM** is roughly **2.05–2.26x faster overall than standard FiOne** (and **1.56x faster than SComputers' FiOne fork**), winning across recursion, function/closure calls, upvalues, `ipairs`/`pairs`, table constructors, prime sieves, and metamethods. It is still slower than native LuaJIT, which is a different execution model.
 
-A broader **50-case head-to-head** against FiOne (actual FiOne execution, not copied numbers) gives **32 wins, 14 losses, and 4 near-ties**, with a geometric-mean speed ratio of about **1.30x** (and **2.69x** by total median time: **1.96 s vs 5.28 s**). Full data: `BENCHMARK_50.md`. These are microbenchmarks, not a representative game workload.
+A broader **50-case head-to-head** against FiOne (actual FiOne execution) gives **32 wins, 14 losses, and 4 near-ties**, with a geometric-mean speed ratio of **1.30x** and a **2.69x** total speedup across all 50 medians (**1.96 s vs 5.28 s**). Full data: [`BENCHMARK_50.md`](BENCHMARK_50.md).
 
 Tail calls reuse the current VM frame, so `return f(...)` does not grow the call-depth budget or the frame stack.
 
-**LuaJIT 2.1 note:** the base comparison path runs through a small non-JIT helper, and fused ordering-comparison opcodes are disabled when a `jit` table is present. Equality and inequality fusions remain enabled and JIT-compiled. This avoids an intermittent LuaJIT miscompile observed under long differential-fuzz runs while keeping common conditions fast. Arithmetic and loop execution remain JIT-compiled.
+**LuaJIT 2.1 note:** the base comparison path runs through a small non-JIT helper, and fused ordering-comparison opcodes route through that helper when a `jit` table is present. Equality and inequality fusions remain JIT-compiled. This avoids an intermittent LuaJIT miscompile observed under long differential-fuzz runs while keeping common conditions fast. Arithmetic and loop execution remain JIT-compiled.
 
 ## Files
 
 ```text
-custom_loadstring_full.lua   # the library
-README.md                    # this file
-README.ru.md                 # Russian version
-TECHNICAL.md                 # short implementation guide
-TECHNICAL.ru.md              # Russian implementation guide
+custom_loadstring_full.lua   # GoogiVM single-file compiler + VM
+README.md                    # documentation
+TECHNICAL.md                 # implementation guide
+BENCHMARK_50.md              # 50-case benchmark report vs FiOne
+BENCHMARK_50.csv             # raw benchmark timings
 LICENSE                      # MIT
 run_all_tests.lua            # test runner
 tests/                       # test suite
@@ -172,7 +170,7 @@ AGENTS.md                    # notes for AI coding agents
 .gitattributes
 ```
 
-For how the compiler, bytecode, and VM work, see [`TECHNICAL.md`](TECHNICAL.md) or [`TECHNICAL.ru.md`](TECHNICAL.ru.md).
+For how the compiler, bytecode, and VM work, see [`TECHNICAL.md`](TECHNICAL.md).
 
 ## License
 

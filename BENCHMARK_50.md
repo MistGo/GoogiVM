@@ -1,4 +1,4 @@
-# 50 head-to-head benchmarks: LuaSandbox VM vs FiOne vs LuaJIT native
+# 50 head-to-head benchmarks: GoogiVM vs FiOne vs LuaJIT native
 
 Date: 2026-10-28  
 Host: LuaJIT 2.1 (64-bit), Windows  
