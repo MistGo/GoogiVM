@@ -101,6 +101,7 @@ local FOP = {
     FORLOOP_ADD_INDEX = 114,
     FORLOOP_SETINDEX_RR = 115, FORLOOP_SETINDEX_RK = 116,
     FORLOOP_SUB_RR = 117, FORLOOP_SUB_RK = 118,
+    JMPF_MOD_EQ_K = 119,
 }
 
 local run_closure
@@ -247,6 +248,7 @@ run_closure = function(fn, trace, ...)
     local F_FORLOOP_ADD_INDEX = 114
     local F_FORLOOP_SETINDEX_RR, F_FORLOOP_SETINDEX_RK = 115, 116
     local F_FORLOOP_SUB_RR, F_FORLOOP_SUB_RK = 117, 118
+    local F_JMPF_MOD_EQ_K = 119
 
     local info = closure_info[fn]
     local p = info.p
@@ -330,6 +332,14 @@ run_closure = function(fn, trace, ...)
                 top = top + 1
                 S[top] = S[base + C[pc + 1] - 1] % K[C[pc + 2]]
                 pc = pc + 12
+
+            elseif op == F_JMPF_MOD_EQ_K then
+                local v = S[base + C[pc + 1] - 1] % K[C[pc + 2]]
+                if v == K[C[pc + 3]] then
+                    pc = pc + 24
+                else
+                    pc = C[pc + 14]
+                end
 
             elseif op == F_JMPF_EQ_K then
                 local v = S[top]
@@ -2311,8 +2321,10 @@ local function custom_loadstring(source, env, opts)
                 [GT] = FOP.JMPF_GT_K, [GE] = FOP.JMPF_GE_K,
             }
             if has_jit then
-                -- See the LuaJIT note near custom_loadstring.
-                for _, op in ipairs({ EQ, NE, LT, LE, GT, GE }) do
+                -- See the LuaJIT note near custom_loadstring. Equality
+                -- fusions are safe; only ordering comparisons have the
+                -- intermittent upstream miscompile.
+                for _, op in ipairs({ LT, LE, GT, GE }) do
                     rr[op] = nil
                     rk[op] = nil
                     kop[op] = nil
@@ -2566,6 +2578,27 @@ local function custom_loadstring(source, env, opts)
                 else
                     local np = try_expr(pos)
                     if np then pos = np else pos = pos + 4 end
+                end
+            end
+
+            -- Fold `(value % K) == K2` + JMPF into one branch. Equality is
+            -- safe under LuaJIT; the ordering comparisons stay out of JIT.
+            for pc = 1, n, 4 do
+                if co[pc] == FOP.MOD_RK and pc + 20 <= n and
+                   co[pc + 12] == FOP.JMPF_EQ_K and
+                   not dead[pc] and not targets[pc + 4] and
+                   not targets[pc + 8] and not targets[pc + 12] and
+                   not targets[pc + 20] then
+                    local r = co[pc + 1]
+                    local kmod = co[pc + 2]
+                    local keq = co[pc + 13]
+                    co[pc] = FOP.JMPF_MOD_EQ_K
+                    co[pc + 1] = r
+                    co[pc + 2] = kmod
+                    co[pc + 3] = keq
+                    for i = 1, 5 do
+                        dead[pc + i * 4] = true
+                    end
                 end
             end
 

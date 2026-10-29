@@ -46,7 +46,7 @@ Function prototypes are stored in a shared prototype list. The root chunk is its
 
 ## Bytecode
 
-Normal opcodes are numbered **1–51**. Fused opcodes produced by the optimizer are numbered **52-118** and grouped by purpose:
+Normal opcodes are numbered **1–51**. Fused opcodes produced by the optimizer are numbered **52-119** and grouped by purpose:
 
 | Range | Purpose |
 |---:|---|
@@ -57,6 +57,7 @@ Normal opcodes are numbered **1–51**. Fused opcodes produced by the optimizer 
 | 95–101 | compound assignment patterns |
 | 102–109 | conditional jumps |
 | 110-118 | numeric-for loop-variable copies and fused loop-body operations |
+| 119 | fused modulo/equality branch |
 
 The bytecode is private. It is not serialized, has no stable ABI, and should not be persisted between versions.
 
@@ -75,7 +76,7 @@ A fusion is never allowed to cross a jump target. `can()` checks the target and 
 
 The optimizer also folds a numeric-for loop-variable copy into `FORLOOP_MOV` or `FORLOOP_CELL`. The first iteration still uses the body copy; later iterations are handled by the loop opcode.
 
-For the hottest numeric loops it further folds the first body operation into the loop opcode: `sum = sum + i`, `t[i] = i`, `sum = sum + t[i]`, and similar patterns. The loop opcode then performs the increment, the body operation, and the next dispatch in one VM iteration.
+For the hottest numeric loops it further folds the first body operation into the loop opcode: `sum = sum + i`, `t[i] = i`, `sum = sum + t[i]`, and similar patterns. The loop opcode then performs the increment, the body operation, and the next dispatch in one VM iteration. `(value % K) == K2` followed by a conditional jump is folded into `JMPF_MOD_EQ_K`, which also avoids the intermediate stack push/pop.
 
 ## VM
 
@@ -127,7 +128,7 @@ Global reads and writes use the supplied `env` table directly, so `__index` and 
 
 ### LuaJIT compatibility
 
-LuaJIT 2.1 can intermittently miscompile the base comparison path inside the large VM function under long fuzz workloads. Base comparisons are therefore routed through a small function that is explicitly `jit.off` when the `jit` API is present, and fused comparison opcodes are disabled on such hosts. Arithmetic and loops remain JIT-compiled.
+LuaJIT 2.1 can intermittently miscompile the base comparison path inside the large VM function under long fuzz workloads. Base comparisons are therefore routed through a small function that is explicitly `jit.off` when the `jit` API is present, and fused ordering-comparison opcodes are disabled on such hosts. Equality and inequality fusions remain enabled. Arithmetic and loops remain JIT-compiled.
 
 ### Errors and source map
 

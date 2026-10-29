@@ -148,11 +148,11 @@ The `tests/` directory is only for development; it is not needed to use the libr
 
 ## Performance
 
-On the project microbenchmarks, this interpreter is roughly **2-3x faster than FiOne** on call-heavy, numeric-loop, and Fibonacci workloads. Table access is roughly **1.6x faster**; branch-heavy loops are slower under LuaJIT because the comparison workaround keeps them out of the JIT. It is still much slower than native LuaJIT, which is a different execution model. These are microbenchmarks, not a representative game workload.
+On the project microbenchmarks, this interpreter is roughly **2-3x faster than FiOne** on call-heavy, numeric-loop, and Fibonacci workloads. Table access is roughly **1.6x faster**; branch-heavy loops are roughly at parity under LuaJIT because the ordering-comparison workaround keeps them out of the JIT. It is still much slower than native LuaJIT, which is a different execution model. These are microbenchmarks, not a representative game workload.
 
 Tail calls reuse the current VM frame, so `return f(...)` does not grow the call-depth budget or the frame stack.
 
-**LuaJIT 2.1 note:** the base comparison path runs through a small non-JIT helper, and fused comparison opcodes are disabled when a `jit` table is present. This avoids an intermittent LuaJIT miscompile observed under long differential-fuzz runs. Arithmetic and loop execution remain JIT-compiled.
+**LuaJIT 2.1 note:** the base comparison path runs through a small non-JIT helper, and fused ordering-comparison opcodes are disabled when a `jit` table is present. Equality and inequality fusions remain enabled and JIT-compiled. This avoids an intermittent LuaJIT miscompile observed under long differential-fuzz runs while keeping common conditions fast. Arithmetic and loop execution remain JIT-compiled.
 
 ## Files
 

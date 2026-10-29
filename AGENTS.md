@@ -78,13 +78,13 @@ source
 Important details:
 
 - Instructions are stored as four numbers: `{OPCODE, A, B, C}`.
-- Normal opcodes are 1–51; fused opcodes are 52-118.
+- Normal opcodes are 1–51; fused opcodes are 52-119.
 - Fused instructions skip dead slots; the program counter can advance by 8, 12, 16, or 24 numbers.
 - The optimizer does not shift code. It overwrites the first slot and marks the rest dead.
 - Captured locals become heap cells (`GETCELL`/`SETCELL`); loop variables can get a fresh cell per iteration.
 - Calls use `CALLD`; custom-to-custom calls push explicit VM frames instead of recursing through the host. `return f(...)` sets the `C` operand to mark a tail call; interpreted targets reuse the current frame, native targets fall through to `RET`.
 - Multi-return uses `MARK`, `POP`, `PEEK`, `VARARG`, and `SETLISTMULTI`.
-- On LuaJIT, base comparisons go through `compare_op`, which is `jit.off`; fused comparison opcodes are suppressed to avoid an intermittent upstream miscompile.
+- On LuaJIT, base comparisons go through `compare_op`, which is `jit.off`; fused ordering-comparison opcodes are suppressed to avoid an intermittent upstream miscompile. Equality and inequality fusions stay enabled.
 
 ## Invariants
 
