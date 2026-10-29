@@ -180,7 +180,7 @@ GoogiVM does not ship a second standard library.
 
 Measured directly inside **Scrap Mechanic** with [`benchmarks/benchmark11.lua`](benchmarks/benchmark11.lua), in one session, back to back against the **ScrapComputers VM (FiOne)** and the **SComputers VM**:
 
-| Workload | **GoogiVM** | ScrapComputers (FiOne) | SComputers | **GoogiVM vs ScrapComputers** | **GoogiVM vs SComputers** |
+| Workload | **GoogiVM** | ScrapComputers | SComputers | **GoogiVM vs ScrapComputers** | **GoogiVM vs SComputers** |
 |---|---:|---:|---:|---:|---:|
 | `fib(30)` recursive | **2.719 s** | 5.534 s | 4.156 s | **2.04x** | **1.53x** |
 | `fib(32)` recursive | **6.926 s** | 14.002 s | 10.401 s | **2.02x** | **1.50x** |
