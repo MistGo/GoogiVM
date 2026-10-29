@@ -63,14 +63,14 @@ The script tolerates a stripped sandbox: it never touches `_G`, `io`, `arg`,
 `dofile`, `setfenv`, `rawget`, or `getmetatable` unconditionally, and it skips
 file output when `io` is absent.
 
-In-game evidence from the reference sessions is transcribed in
-[`in-game/README.md`](in-game/README.md).
+In-game numbers come from the maintainer pasting this script into a computer
+block inside Scrap Mechanic; the repository cannot drive the game.
 
-## `bench50_actual.lua` — 50-case head-to-head
+## `bench50_actual.lua` – 50-case head-to-head
 
-Generates [`../BENCHMARK_50.md`](../BENCHMARK_50.md),
-[`../BENCHMARK_50.csv`](../BENCHMARK_50.csv) and
-[`../BENCHMARK_50_raw.csv`](../BENCHMARK_50_raw.csv) (every sample).
+Generates [`../BENCHMARK_50.md`](../BENCHMARK_50.md) and
+[`../BENCHMARK_50.csv`](../BENCHMARK_50.csv), plus an untracked
+`BENCHMARK_50_raw.csv` with every sample.
 
 Requirements (not shipped here):
 

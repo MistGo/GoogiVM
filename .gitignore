@@ -9,3 +9,4 @@ Thumbs.db
 tmp/
 benchmark11_*.csv
 benchmark11_*_raw.txt
+BENCHMARK_50_raw.csv

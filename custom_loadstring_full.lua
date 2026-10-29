@@ -160,13 +160,6 @@ end
 -- guest or the host can observe.
 local LOCATION_MARK = "\1"
 
-local function clean_error(err)
-    if type(err) == "string" and str_sub(err, 1, 1) == LOCATION_MARK then
-        return str_sub(err, 2)
-    end
-    return err
-end
-
 local function sandbox_message(err)
     if type(err) ~= "string" then
         return err

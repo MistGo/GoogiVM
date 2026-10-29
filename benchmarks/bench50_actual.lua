@@ -19,7 +19,7 @@
   ---------------------------------------------
       BENCHMARK_50.md        report with medians, ratios and aggregates
       BENCHMARK_50.csv       per-case medians / best / reps
-      BENCHMARK_50_raw.csv   every individual sample (7 per case per engine)
+      BENCHMARK_50_raw.csv   every individual sample (7 per case per engine, untracked)
 
   The timed region is execution only: FiOne bytecode compilation and GoogiVM
   source compilation are outside the timer.
@@ -286,7 +286,7 @@ md[#md + 1] = "- All engines received the same source and the same standard-libr
 md[#md + 1] = "- Timed region is execution only: FiOne bytecode loading and GoogiVM compilation are outside the timer."
 md[#md + 1] = "- 3 warm-up iterations, " .. SAMPLES ..
     " measured iterations; JIT traces are flushed before each engine/case measurement."
-md[#md + 1] = "- The table shows the median; `BENCHMARK_50_raw.csv` contains every individual sample."
+md[#md + 1] = "- The table shows the median; `bench50_actual.lua` also writes an untracked `BENCHMARK_50_raw.csv` with every individual sample."
 md[#md + 1] = "- Native LuaJIT is a reference baseline, not a pure-Lua competitor."
 md[#md + 1] = ""
 md[#md + 1] = "## Results"

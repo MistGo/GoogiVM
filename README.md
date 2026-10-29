@@ -199,8 +199,8 @@ Measured directly inside **Scrap Mechanic** with [`benchmarks/benchmark11.lua`](
 Geometric mean of per-case speedups: **1.48x** vs ScrapComputers (11 cases) and **1.21x** vs SComputers (10 shared cases).
 
 These are **transcribed in-game console logs**, not CI artifacts: Scrap Mechanic
-cannot be scripted from this repository. The verbatim transcripts and the
-reproduction steps are in [`benchmarks/in-game/README.md`](benchmarks/in-game/README.md).
+cannot be scripted from this repository. Reproduce them by pasting
+[`benchmarks/benchmark11.lua`](benchmarks/benchmark11.lua) into a computer block.
 Single session, single machine; treat sub-5% differences as noise. GoogiVM is
 clearly slower in `10k string concatenations` and slightly slower in
 `1M branch/mod` against SComputers.
@@ -227,9 +227,9 @@ Per-category median ratios from [`BENCHMARK_50.csv`](BENCHMARK_50.csv), includin
 | `ipairs` / `pairs` / `next` | 0.84x - 2.30x | `generic_next_100k` 0.84x |
 | Metatables | 4.04x | `metatable_add_100k` |
 
-These ranges are taken directly from the CSV; the geometric mean of **1.21x** is the honest aggregate because the suite still contains real losses. Every individual sample (7 per case per engine) is in [`BENCHMARK_50_raw.csv`](BENCHMARK_50_raw.csv), and [`benchmarks/bench50_actual.lua`](benchmarks/bench50_actual.lua) regenerates all three artifacts.
+These ranges are taken directly from the CSV; the geometric mean of **1.21x** is the honest aggregate because the suite still contains real losses. [`benchmarks/bench50_actual.lua`](benchmarks/bench50_actual.lua) regenerates the report and the CSV (it also writes an untracked per-sample dump).
 
-See [`BENCHMARK_50.md`](BENCHMARK_50.md), [`BENCHMARK_50.csv`](BENCHMARK_50.csv) and [`BENCHMARK_50_raw.csv`](BENCHMARK_50_raw.csv) (every individual sample) for the full breakdown.
+See [`BENCHMARK_50.md`](BENCHMARK_50.md) and [`BENCHMARK_50.csv`](BENCHMARK_50.csv) for the full breakdown.
 
 ---
 
@@ -299,8 +299,7 @@ README.md                    # Project overview, API, and benchmark summary
 TECHNICAL.md                 # Internal architecture and opcode reference
 BENCHMARK_50.md              # 50-case benchmark report (GoogiVM vs FiOne)
 BENCHMARK_50.csv             # Per-case medians, bests and repetition counts
-BENCHMARK_50_raw.csv         # Every individual sample (7 per case per engine)
-benchmarks/                  # Reproducible harnesses (11-case, 50-case) + logs
+benchmarks/                  # Reproducible harnesses (11-case, 50-case)
 run_all_tests.lua            # Automated test runner
 tests/                       # 17 test modules + test suite documentation
 AGENTS.md                    # Guidelines and invariants for AI coding agents

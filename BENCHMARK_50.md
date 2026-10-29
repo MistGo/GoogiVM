@@ -12,7 +12,7 @@ Bytecode compiler for FiOne: `luac5.1` (Lua 5.1.5)
 - All engines received the same source and the same standard-library environment.
 - Timed region is execution only: FiOne bytecode loading and GoogiVM compilation are outside the timer.
 - 3 warm-up iterations, 7 measured iterations; JIT traces are flushed before each engine/case measurement.
-- The table shows the median; `BENCHMARK_50_raw.csv` contains every individual sample.
+- The table shows the median; `bench50_actual.lua` also writes an untracked `BENCHMARK_50_raw.csv` with every individual sample.
 - Native LuaJIT is a reference baseline, not a pure-Lua competitor.
 
 ## Results
