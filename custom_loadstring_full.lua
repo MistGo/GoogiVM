@@ -26,6 +26,7 @@ local str_match = string.match
 local str_sub = string.sub
 local str_byte = string.byte
 local str_char = string.char
+local str_gsub = string.gsub
 local tconcat = table.concat
 local tostring = tostring
 local tonumber = tonumber
@@ -122,9 +123,49 @@ if type(jit) == "table" and jit.off then
     jit.off(compare_op)
 end
 
+local function format_runtime_error(err, trace)
+    if type(err) ~= "string" or not trace or not trace.cur then
+        return err
+    end
+    local p = trace.cur.p
+    local pc = trace.pc or 1
+    local line = p.lines and p.lines[pc]
+    if not line then
+        return err
+    end
+
+    -- Host errors start with "file.lua:NN: ". Replace that with the
+    -- interpreted source location rather than stacking both prefixes.
+    local msg = str_gsub(err, "^[^\n:]+:%d+: ", "", 1)
+    local out = (p.sourceName or "<string>") .. ":" .. line .. ": " .. msg
+
+    local frames = trace.frames
+    local fi = trace.fi
+    if frames and fi and fi > 1 then
+        for i = fi - 1, 1, -1 do
+            local fr = frames[i]
+            if fr then
+                local fp = fr.p
+                local fpc = fr.pc or 1
+                local fl = fp.lines and fp.lines[fpc]
+                if fl then
+                    out = out .. "\n  at " ..
+                        (fp.sourceName or "<string>") .. ":" .. fl
+                end
+            end
+        end
+    end
+    return out
+end
+
 local function make_closure(proto, upvals, fenv)
     local function closure(...)
-        return run_closure(closure, ...)
+        local trace = {}
+        local result = pack(pcall(run_closure, closure, trace, ...))
+        if result[1] then
+            return unpack(result, 2, result.n)
+        end
+        error(format_runtime_error(result[2], trace), 0)
     end
     local env = fenv or proto.env
     local native_env = false
@@ -161,7 +202,8 @@ local function set_closure_env(fn, newenv)
     return true
 end
 
-run_closure = function(fn, ...)
+run_closure = function(fn, trace, ...)
+    trace = trace or {}
     local LOADK, LOADBOOL, LOADNIL = 1, 2, 3
     local GETLOCAL, SETLOCAL, GETCELL, SETCELL, CELL = 4, 5, 6, 7, 8
     local GETUPVAL, SETUPVAL, GETGLOBAL, SETGLOBAL = 9, 10, 11, 12
@@ -247,6 +289,11 @@ run_closure = function(fn, ...)
         ret_sp = 0, wanted = -1, va = va, env = cenv, cl = fn,
     }
     frames[1] = cur
+    trace.p = p
+    trace.cur = cur
+    trace.frames = frames
+    trace.fi = fi
+    trace.pc = 1
 
     local C = p.code
     local K = p.consts
@@ -262,6 +309,7 @@ run_closure = function(fn, ...)
             end
         end
 
+        trace.pc = pc
         local op = C[pc]
 
         if op >= 52 then
@@ -929,6 +977,8 @@ run_closure = function(fn, ...)
                 }
                 fi = fi + 1
                 frames[fi] = cur
+                trace.cur = cur
+                trace.fi = fi
 
                 p = cp
                 C = cp.code
@@ -1133,6 +1183,8 @@ run_closure = function(fn, ...)
             end
 
             cur = frames[fi]
+            trace.cur = cur
+            trace.fi = fi
             p = cur.p
             C = p.code
             K = p.consts
@@ -1347,12 +1399,37 @@ local function custom_loadstring(source, env, opts)
         return nil, "source exceeds maxSourceBytes"
     end
 
+    local sourceName = "<string>"
+    if opts and opts.sourceName ~= nil then
+        if type(opts.sourceName) ~= "string" then
+            return nil, "option 'sourceName' must be a string"
+        end
+        sourceName = opts.sourceName
+    end
+
     local function compile()
         local len = #source
         local pos = 1
         local tk = ""
         local tv = nil
         local tp = 1
+        local last_tp = 1
+
+        local line_starts = { 1 }
+        local line_pos = 1
+        while line_pos <= len do
+            local nl = str_find(source, "[\r\n]", line_pos)
+            if not nl then
+                break
+            end
+            if str_sub(source, nl, nl) == "\r" and
+               str_sub(source, nl + 1, nl + 1) == "\n" then
+                line_pos = nl + 2
+            else
+                line_pos = nl + 1
+            end
+            line_starts[#line_starts + 1] = line_pos
+        end
 
         local LOADK, LOADBOOL, LOADNIL = 1, 2, 3
         local GETLOCAL, SETLOCAL, GETCELL, SETCELL, CELL = 4, 5, 6, 7, 8
@@ -1377,21 +1454,16 @@ local function custom_loadstring(source, env, opts)
         }
 
         local function line_of(p)
-            local line = 1
-            local i = 1
-            while true do
-                local n = str_find(source, "[\r\n]", i)
-                if not n or n >= p then
-                    return line
-                end
-                line = line + 1
-                if str_sub(source, n, n) == "\r" and
-                   str_sub(source, n + 1, n + 1) == "\n" then
-                    i = n + 2
+            local lo, hi = 1, #line_starts
+            while lo < hi do
+                local mid = math.floor((lo + hi + 1) / 2)
+                if line_starts[mid] <= p then
+                    lo = mid
                 else
-                    i = n + 1
+                    hi = mid - 1
                 end
             end
+            return lo
         end
 
         local function near()
@@ -1614,6 +1686,7 @@ local function custom_loadstring(source, env, opts)
         end
 
         local function advance()
+            last_tp = tp
             skip_space()
             tp = pos
             if pos > len then
@@ -1712,7 +1785,7 @@ local function custom_loadstring(source, env, opts)
         local function new_fc(parent, isvararg, numparams)
             return {
                 parent = parent,
-                code = {}, ncode = 0,
+                code = {}, lines = {}, ncode = 0,
                 consts = {}, cmap = {}, kcount = 0,
                 locals = {}, nlocals = 0,
                 upvals = {},
@@ -1729,6 +1802,7 @@ local function custom_loadstring(source, env, opts)
             co[i + 1] = a or 0
             co[i + 2] = b or 0
             co[i + 3] = c or 0
+            fc.lines[i] = line_of(last_tp)
             fc.ncode = i + 3
             return i
         end
@@ -2705,12 +2779,14 @@ local function custom_loadstring(source, env, opts)
 
             local proto = {
                 code = child.code,
+                lines = child.lines,
                 consts = child.consts,
                 updesc = child.upvals,
                 numparams = child.numparams,
                 isvararg = child.isvararg,
                 maxreg = child.maxreg,
                 env = env,
+                sourceName = sourceName,
                 protos = all_protos,
                 limits = limits,
             }
@@ -3323,12 +3399,14 @@ local function custom_loadstring(source, env, opts)
 
         local proto = {
             code = fc.code,
+            lines = fc.lines,
             consts = fc.consts,
             updesc = fc.upvals,
             numparams = 0,
             isvararg = true,
             maxreg = fc.maxreg,
             env = env,
+            sourceName = sourceName,
             protos = all_protos,
             limits = limits,
         }

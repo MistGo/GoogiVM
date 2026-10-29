@@ -60,7 +60,7 @@ Returns:
 - a callable Lua function on success;
 - `nil, error_string` for an invalid argument or a syntax error.
 
-Syntax errors include a line and a nearby token. Runtime errors propagate out of the chunk, so catch them with `pcall` if needed:
+Syntax errors include a line and a nearby token. Runtime errors are mapped to the interpreted source location and include a short call trace (`sourceName:line: message`), so catch them with `pcall` if needed:
 
 ```lua
 local ok, result = pcall(chunk)
@@ -71,10 +71,11 @@ end
 
 ### Options and limits
 
-The third argument is optional and backward compatible. It accepts positive numbers:
+The third argument is optional and backward compatible. It accepts positive numeric limits and an optional source name:
 
 | Option | Default | Meaning |
 |---|---:|---|
+| `sourceName` | `"<string>"` | Name used in runtime errors and tracebacks |
 | `maxSourceBytes` | 4 MiB | Maximum source size in bytes |
 | `maxCodeSlots` | 8,000,000 | Maximum bytecode slots per prototype |
 | `maxInstructions` | 50,000,000 | VM instructions per chunk invocation |
@@ -85,13 +86,14 @@ The third argument is optional and backward compatible. It accepts positive numb
 
 ```lua
 local chunk, err = custom_loadstring(source, env, {
+    sourceName = "user_script",
     maxInstructions = 5e6,
     maxCallDepth = 500,
     maxSourceBytes = 512 * 1024,
 })
 ```
 
-Limits are enabled by default. Set a numeric option to `math.huge` to disable that individual limit. Unknown option keys are ignored. Invalid, zero, negative, or NaN values make compilation fail.
+Limits are enabled by default. Set a numeric limit to `math.huge` to disable that individual limit. Unknown option keys are ignored. Invalid, zero, negative, or NaN limit values make compilation fail; `sourceName` must be a string.
 
 The returned chunk can be called many times. Locals are fresh on every call; the environment table is shared.
 
@@ -138,8 +140,8 @@ lua run_all_tests.lua
 
 Expected results:
 
-- LuaJIT: **18,658 checks**, 0 failed;
-- Lua 5.4: **18,640 checks**, 0 failed (some `setfenv`/`getfenv`/`__len` checks are skipped).
+- LuaJIT: **18,661 checks**, 0 failed;
+- Lua 5.4: **18,643 checks**, 0 failed (some `setfenv`/`getfenv`/`__len` checks are skipped).
 
 The `tests/` directory is only for development; it is not needed to use the library. Detailed test coverage is in [`tests/README.md`](tests/README.md).
 

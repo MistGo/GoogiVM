@@ -125,11 +125,15 @@ Global reads and writes use the supplied `env` table directly, so `__index` and 
 
 LuaJIT 2.1 can intermittently miscompile the base comparison path inside the large VM function under long fuzz workloads. Base comparisons are therefore routed through a small function that is explicitly `jit.off` when the `jit` API is present, and fused comparison opcodes are disabled on such hosts. Arithmetic and loops remain JIT-compiled.
 
-### Errors
+### Errors and source map
 
-Syntax errors are caught by `pcall(compile)` and returned as `nil, message`. Runtime errors are not caught: they propagate out of the chunk and preserve the original error object. Runtime errors do not have a script-level line map.
+Syntax errors are caught by `pcall(compile)` and returned as `nil, message`. Every prototype carries `sourceName` and a `lines` table populated by `emit`. Runtime string errors are mapped to `sourceName:line` and include interpreted call frames; non-string error objects are preserved unchanged.
 
-## Source map
+### Source map
+
+Compile-time line tracking builds `line_starts` once per chunk and uses binary search in `line_of`. `emit` records the line of the last consumed token, which avoids the common “next token” off-by-one for expressions. Runtime tracing updates the current frame and program counter before each instruction so the error path can report the interpreted location.
+
+## Implementation map
 
 Useful places in `custom_loadstring_full.lua`:
 
@@ -158,8 +162,7 @@ Never fuse across a jump target and never skip a live instruction.
 ## Known limits
 
 - No tail-call optimization.
-- No runtime source-line mapping.
-- No wall-clock timeout or memory quota; instruction/call-depth/stack budgets are available, but external process isolation is still recommended.
+- Wall-clock timeout and memory quota are not provided; instruction/call-depth/stack budgets are available, but external process isolation is still recommended.
 - No bytecode serialization.
 - No Lua 5.2+ grammar.
 - Deep recursion is bounded by `maxCallDepth` and the VM value stack; there is no tail-call reuse.

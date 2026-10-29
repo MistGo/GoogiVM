@@ -18,7 +18,7 @@ local chunk, err = custom_loadstring(source, env, options)
 - `options` is optional and may contain execution/compile limits.
 - Success returns a callable function.
 - Compile failure returns `nil, error_string`.
-- Runtime errors propagate out of the chunk.
+- Runtime string errors propagate with `sourceName:line` and an interpreted trace; non-string error objects are preserved.
 
 ## Hard constraints
 
@@ -58,8 +58,8 @@ LuaJIT is the primary target. Lua 5.4 is a compatibility smoke run; some `setfen
 
 Expected baseline:
 
-- LuaJIT: 18,658 checks, 0 failed.
-- Lua 5.4: 18,640 checks, 0 failed.
+- LuaJIT: 18,661 checks, 0 failed.
+- Lua 5.4: 18,643 checks, 0 failed.
 
 If `luajit` is unavailable in the environment, run the Lua suite and report that the primary host was not tested.
 

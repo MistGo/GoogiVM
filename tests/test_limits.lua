@@ -85,4 +85,38 @@ return f(...)
         for i = 1, 50 do args[i] = i end
         t:check(not pcall(f, unpack(args)), "maxStack must reject a large stack")
     end
+
+    -- Runtime errors are mapped to the interpreted source line.
+    f = assert(custom([[
+local x = nil
+return x + 1
+]], {}, { sourceName = "trace.lua" }))
+    do
+        local ok, err = pcall(f)
+        t:check(not ok and type(err) == "string" and
+            err:find("trace.lua:2:", 1, true) ~= nil,
+            "runtime error source line: " .. tostring(err))
+    end
+
+    -- A traceback contains the interpreted call frames.
+    f = assert(custom([[
+local function a()
+    local function b()
+        return nil + 1
+    end
+    return b()
+end
+return a()
+]], {}, { sourceName = "trace.lua" }))
+    do
+        local ok, err = pcall(f)
+        t:check(not ok and type(err) == "string" and
+            err:find("trace.lua:3:", 1, true) ~= nil and
+            err:find("  at trace.lua:", 1, true) ~= nil,
+            "runtime traceback: " .. tostring(err))
+    end
+
+    -- sourceName must be a string.
+    f, err = custom("return 1", {}, { sourceName = 123 })
+    t:check(f == nil and type(err) == "string", "invalid sourceName rejected")
 end
