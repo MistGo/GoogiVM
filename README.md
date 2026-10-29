@@ -148,7 +148,9 @@ The `tests/` directory is only for development; it is not needed to use the libr
 
 ## Performance
 
-On the project microbenchmarks, this interpreter is roughly **2-3x faster than FiOne** on call-heavy, numeric-loop, and Fibonacci workloads. Table access is roughly **1.6x faster**; branch-heavy loops are roughly at parity under LuaJIT because the ordering-comparison workaround keeps them out of the JIT. It is still much slower than native LuaJIT, which is a different execution model. These are microbenchmarks, not a representative game workload.
+On focused microbenchmarks, this interpreter is roughly **2-3x faster than FiOne** on call-heavy, numeric-loop, and Fibonacci workloads. Table reads/writes are roughly **1.6-1.9x faster**; branch-heavy loops are roughly at parity under LuaJIT because the ordering-comparison workaround keeps them out of the JIT. It is still much slower than native LuaJIT, which is a different execution model.
+
+A broader **50-case head-to-head** against FiOne (actual FiOne execution, not copied numbers) gives **28 wins, 20 losses, and 2 near-ties**, with a geometric-mean speed ratio of about **1.13x**. It is **not universally faster**: table constructors, generic-for, while/repeat, and some metamethod cases are slower. Full data: `BENCHMARK_50.md`. These are microbenchmarks, not a representative game workload.
 
 Tail calls reuse the current VM frame, so `return f(...)` does not grow the call-depth budget or the frame stack.
 
