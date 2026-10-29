@@ -98,6 +98,23 @@ return x + 1
             "runtime error source line: " .. tostring(err))
     end
 
+    -- Fused loop operations still report the body source line.
+    f = assert(custom([[
+local s = 0
+local x = 1
+for i = 1, 3 do
+    s = s + x
+    x = {}
+end
+return s
+]], {}, { sourceName = "loop.lua" }))
+    do
+        local ok, err = pcall(f)
+        t:check(not ok and type(err) == "string" and
+            err:find("loop.lua:4:", 1, true) ~= nil,
+            "fused loop error source line: " .. tostring(err))
+    end
+
     -- A traceback contains the interpreted call frames.
     f = assert(custom([[
 local function a()

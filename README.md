@@ -141,8 +141,8 @@ lua run_all_tests.lua
 
 Expected results:
 
-- LuaJIT: **18,680 checks**, 0 failed;
-- Lua 5.4: **18,662 checks**, 0 failed (some `setfenv`/`getfenv`/`__len` checks are skipped).
+- LuaJIT: **18,681 checks**, 0 failed;
+- Lua 5.4: **18,663 checks**, 0 failed (some `setfenv`/`getfenv`/`__len` checks are skipped).
 
 The `tests/` directory is only for development; it is not needed to use the library. Detailed test coverage is in [`tests/README.md`](tests/README.md).
 
