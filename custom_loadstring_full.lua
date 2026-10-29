@@ -128,6 +128,9 @@ local FOP = {
     SETLOCAL_BOOL = 144,
     FORLOOP_MOD_RR_EQ_K = 145,
     FORLOOP_NEWTABLE_SETINDEX_R = 146,
+
+    TESTF_CMP_RR = 147, TESTF_CMP_RK = 148,
+    TESTT_CMP_RR = 149, TESTT_CMP_RK = 150,
 }
 
 local run_closure
@@ -153,6 +156,56 @@ local function compare_op(op, a, b)
 end
 if type(jit) == "table" and jit.off then
     jit.off(compare_op)
+end
+
+-- Ordered comparisons on two numbers are the overwhelmingly common case inside
+-- hot loops. Doing them inline keeps those loops traceable by LuaJIT instead of
+-- bouncing through the jit-disabled compare_op on every iteration. Anything
+-- else (strings, metamethods) still goes through compare_op unchanged.
+local function cmp_lt(a, b)
+    if type(a) == "number" and type(b) == "number" then
+        return a < b
+    end
+    return compare_op(25, a, b)
+end
+
+local function cmp_le(a, b)
+    if type(a) == "number" and type(b) == "number" then
+        return a <= b
+    end
+    return compare_op(26, a, b)
+end
+
+local function cmp_gt(a, b)
+    if type(a) == "number" and type(b) == "number" then
+        return a > b
+    end
+    return compare_op(27, a, b)
+end
+
+local function cmp_ge(a, b)
+    if type(a) == "number" and type(b) == "number" then
+        return a >= b
+    end
+    return compare_op(28, a, b)
+end
+
+-- Generic form used by the fused compare+test opcodes, which carry the
+-- comparison opcode as a separate operand.
+local function cmp_value(op, a, b)
+    if op == 23 then
+        return a == b
+    elseif op == 24 then
+        return a ~= b
+    elseif op == 25 then
+        return cmp_lt(a, b)
+    elseif op == 26 then
+        return cmp_le(a, b)
+    elseif op == 27 then
+        return cmp_gt(a, b)
+    else
+        return cmp_ge(a, b)
+    end
 end
 
 -- Messages already carrying a sandbox location are prefixed with this byte so
@@ -581,6 +634,8 @@ run_closure = function(fn, trace, ...)
     local F_SETLOCAL_BOOL = 144
     local F_FORLOOP_MOD_RR_EQ_K = 145
     local F_FORLOOP_NEWTABLE_SETINDEX_R = 146
+    local F_TESTF_CMP_RR, F_TESTF_CMP_RK = 147, 148
+    local F_TESTT_CMP_RR, F_TESTT_CMP_RK = 149, 150
 
     local info = closure_info[fn]
     local p = info.p
@@ -1224,104 +1279,96 @@ run_closure = function(fn, trace, ...)
                 end
 
             elseif op == F_JMPF_LT_RR then
-                if has_jit then
-                    if not compare_op(25, S[base + C[pc + 1] - 1], S[base + C[pc + 2] - 1]) then
-                        pc = C[pc + 3]
-                    else
-                        pc = pc + 16
-                    end
-                elseif not (S[base + C[pc + 1] - 1] < S[base + C[pc + 2] - 1]) then
+                if not cmp_lt(S[base + C[pc + 1] - 1], S[base + C[pc + 2] - 1]) then
                     pc = C[pc + 3]
                 else
                     pc = pc + 16
                 end
 
             elseif op == F_JMPF_LT_RK then
-                if has_jit then
-                    if not compare_op(25, S[base + C[pc + 1] - 1], K[C[pc + 2]]) then
-                        pc = C[pc + 3]
-                    else
-                        pc = pc + 16
-                    end
-                elseif not (S[base + C[pc + 1] - 1] < K[C[pc + 2]]) then
+                if not cmp_lt(S[base + C[pc + 1] - 1], K[C[pc + 2]]) then
                     pc = C[pc + 3]
                 else
                     pc = pc + 16
                 end
 
             elseif op == F_JMPF_LE_RR then
-                if has_jit then
-                    if not compare_op(26, S[base + C[pc + 1] - 1], S[base + C[pc + 2] - 1]) then
-                        pc = C[pc + 3]
-                    else
-                        pc = pc + 16
-                    end
-                elseif not (S[base + C[pc + 1] - 1] <= S[base + C[pc + 2] - 1]) then
+                if not cmp_le(S[base + C[pc + 1] - 1], S[base + C[pc + 2] - 1]) then
                     pc = C[pc + 3]
                 else
                     pc = pc + 16
                 end
 
             elseif op == F_JMPF_LE_RK then
-                if has_jit then
-                    if not compare_op(26, S[base + C[pc + 1] - 1], K[C[pc + 2]]) then
-                        pc = C[pc + 3]
-                    else
-                        pc = pc + 16
-                    end
-                elseif not (S[base + C[pc + 1] - 1] <= K[C[pc + 2]]) then
+                if not cmp_le(S[base + C[pc + 1] - 1], K[C[pc + 2]]) then
                     pc = C[pc + 3]
                 else
                     pc = pc + 16
                 end
 
             elseif op == F_JMPF_GT_RR then
-                if has_jit then
-                    if not compare_op(27, S[base + C[pc + 1] - 1], S[base + C[pc + 2] - 1]) then
-                        pc = C[pc + 3]
-                    else
-                        pc = pc + 16
-                    end
-                elseif not (S[base + C[pc + 1] - 1] > S[base + C[pc + 2] - 1]) then
+                if not cmp_gt(S[base + C[pc + 1] - 1], S[base + C[pc + 2] - 1]) then
                     pc = C[pc + 3]
                 else
                     pc = pc + 16
                 end
 
             elseif op == F_JMPF_GT_RK then
-                if has_jit then
-                    if not compare_op(27, S[base + C[pc + 1] - 1], K[C[pc + 2]]) then
-                        pc = C[pc + 3]
-                    else
-                        pc = pc + 16
-                    end
-                elseif not (S[base + C[pc + 1] - 1] > K[C[pc + 2]]) then
+                if not cmp_gt(S[base + C[pc + 1] - 1], K[C[pc + 2]]) then
                     pc = C[pc + 3]
                 else
                     pc = pc + 16
                 end
 
             elseif op == F_JMPF_GE_RR then
-                if has_jit then
-                    if not compare_op(28, S[base + C[pc + 1] - 1], S[base + C[pc + 2] - 1]) then
-                        pc = C[pc + 3]
-                    else
-                        pc = pc + 16
-                    end
-                elseif not (S[base + C[pc + 1] - 1] >= S[base + C[pc + 2] - 1]) then
+                if not cmp_ge(S[base + C[pc + 1] - 1], S[base + C[pc + 2] - 1]) then
                     pc = C[pc + 3]
                 else
                     pc = pc + 16
                 end
 
             elseif op == F_JMPF_GE_RK then
-                if has_jit then
-                    if not compare_op(28, S[base + C[pc + 1] - 1], K[C[pc + 2]]) then
-                        pc = C[pc + 3]
-                    else
-                        pc = pc + 16
-                    end
-                elseif not (S[base + C[pc + 1] - 1] >= K[C[pc + 2]]) then
+                if not cmp_ge(S[base + C[pc + 1] - 1], K[C[pc + 2]]) then
+                    pc = C[pc + 3]
+                else
+                    pc = pc + 16
+                end
+
+            elseif op == F_TESTF_CMP_RR then
+                local v = cmp_value(C[pc + 4], S[base + C[pc + 1] - 1], S[base + C[pc + 2] - 1])
+                if not v then
+                    top = top + 1
+                    S[top] = v
+                    pc = C[pc + 3]
+                else
+                    pc = pc + 16
+                end
+
+            elseif op == F_TESTF_CMP_RK then
+                local v = cmp_value(C[pc + 4], S[base + C[pc + 1] - 1], K[C[pc + 2]])
+                if not v then
+                    top = top + 1
+                    S[top] = v
+                    pc = C[pc + 3]
+                else
+                    pc = pc + 16
+                end
+
+            elseif op == F_TESTT_CMP_RR then
+                local v = cmp_value(C[pc + 4], S[base + C[pc + 1] - 1], S[base + C[pc + 2] - 1])
+                if v then
+                    top = top + 1
+                    S[top] = v
+                    pc = C[pc + 3]
+                else
+                    pc = pc + 16
+                end
+
+            elseif op == F_TESTT_CMP_RK then
+                local v = cmp_value(C[pc + 4], S[base + C[pc + 1] - 1], K[C[pc + 2]])
+                if v then
+                    top = top + 1
+                    S[top] = v
                     pc = C[pc + 3]
                 else
                     pc = pc + 16
@@ -3334,6 +3381,24 @@ local function custom_loadstring(source, env, opts)
                     else
                         put(pos, jmprk[co[pos + 8]], co[pos + 1], co[pos + 5], co[pos + 13], 4)
                     end
+                    return pos + 16
+                end
+
+                -- local/local and local/constant comparison directly followed by TESTF/TESTT
+                if co[pos] == GETLOCAL and
+                   (co[pos + 4] == GETLOCAL or co[pos + 4] == LOADK) and
+                   co[pos + 8] >= EQ and co[pos + 8] <= GE and
+                   (co[pos + 12] == TESTF or co[pos + 12] == TESTT) and
+                   can(pos, 4) then
+                    local cop = co[pos + 8]
+                    local op2
+                    if co[pos + 12] == TESTF then
+                        op2 = (co[pos + 4] == GETLOCAL) and FOP.TESTF_CMP_RR or FOP.TESTF_CMP_RK
+                    else
+                        op2 = (co[pos + 4] == GETLOCAL) and FOP.TESTT_CMP_RR or FOP.TESTT_CMP_RK
+                    end
+                    put(pos, op2, co[pos + 1], co[pos + 5], co[pos + 13], 4)
+                    co[pos + 4] = cop
                     return pos + 16
                 end
 
