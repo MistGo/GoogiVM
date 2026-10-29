@@ -178,32 +178,36 @@ GoogiVM does not ship a second standard library.
 
 ### 1. In-Game Benchmark (Scrap Mechanic / Lua 5.1)
 
-Measured directly inside **Scrap Mechanic** with [`benchmarks/benchmark11.lua`](benchmarks/benchmark11.lua) against both the standard **ScrapComputers VM (FiOne)** and **SComputers (FiOne fork)**:
+Measured directly inside **Scrap Mechanic** with [`benchmarks/benchmark11.lua`](benchmarks/benchmark11.lua), in one session, back to back against the **ScrapComputers VM (FiOne)** and the **SComputers VM**:
 
-| Workload | **GoogiVM** | ScrapComputers (FiOne, Run 1) | ScrapComputers (FiOne, Run 2) | SComputers (FiOne) | **GoogiVM vs FiOne** | **GoogiVM vs SComputers** |
-|---|---:|---:|---:|---:|---:|---:|
-| `fib(30)` recursive | **2.639 s** | 5.973 s | 5.308 s | 4.203 s | **2.01–2.26x** | **1.59x** |
-| `fib(32)` recursive | **6.969 s** | 16.098 s | 14.762 s | 10.807 s | **2.12–2.31x** | **1.55x** |
-| 1M function calls | **0.911 s** | 2.150 s | 1.944 s | 1.453 s | **2.13–2.36x** | **1.59x** |
-| 1M closure calls | **0.789 s** | 2.172 s | 1.829 s | 1.522 s | **2.32–2.75x** | **1.93x** |
-| 100k upvalue increments | **0.071 s** | 0.180 s | 0.170 s | 0.167 s | **2.39–2.54x** | **2.35x** |
-| 100k vararg calls | **0.206 s** | 0.295 s | 0.257 s | 0.176 s | **1.25–1.43x** | 0.85x |
-| 100k metatable `__add` | **0.135 s** | 0.205 s | 0.185 s | *unsupported* | **1.37–1.52x** | — |
-| 200k table writes + reads | **0.041 s** | 0.043 s | 0.041 s | 0.047 s | **1.00–1.05x** | **1.15x** |
-| 1M branch/mod iterations | **0.226 s** | 0.254 s | 0.233 s | 0.192 s | **1.03–1.12x** | 0.85x |
-| Primes <= 50,000 | **0.205 s** | 0.258 s | 0.242 s | 0.290 s | **1.18–1.26x** | **1.41x** |
-| 10k string concatenations | **0.025 s** | 0.025 s | 0.020 s | 0.006 s | 0.80–1.00x | 0.24x |
-| **Total (All 11 cases)** | **12.217 s** | **27.653 s** | **24.991 s** | — | **2.05–2.26x faster** | — |
-| **Total (10 shared cases)** | **12.082 s** | **27.448 s** | **24.806 s** | **18.863 s** | **2.05–2.27x faster** | **1.56x faster** |
+| Workload | **GoogiVM** | ScrapComputers (FiOne) | SComputers | **GoogiVM vs ScrapComputers** | **GoogiVM vs SComputers** |
+|---|---:|---:|---:|---:|---:|
+| `fib(30)` recursive | **2.719 s** | 5.534 s | 4.156 s | **2.04x** | **1.53x** |
+| `fib(32)` recursive | **6.926 s** | 14.002 s | 10.401 s | **2.02x** | **1.50x** |
+| 1M function calls | **0.910 s** | 1.867 s | 1.594 s | **2.05x** | **1.75x** |
+| 1M closure calls | **0.792 s** | 1.806 s | 1.457 s | **2.28x** | **1.84x** |
+| 100k upvalue increments | **0.069 s** | 0.164 s | 0.135 s | **2.38x** | **1.96x** |
+| 100k vararg calls | **0.206 s** | 0.242 s | 0.221 s | **1.17x** | **1.07x** |
+| 100k metatable `__add` | **0.140 s** | 0.177 s | *runtime error* | **1.26x** | n/a |
+| 200k table writes + reads | **0.039 s** | 0.041 s | 0.049 s | **1.05x** | **1.26x** |
+| 1M branch/mod iterations | 0.220 s | 0.233 s | **0.197 s** | **1.06x** | 0.90x |
+| Primes <= 50,000 | 0.216 s | 0.242 s | **0.213 s** | **1.12x** | 0.99x |
+| 10k string concatenations | 0.018 s | 0.016 s | **0.007 s** | 0.89x | 0.39x |
+| **Total (11 cases)** | **12.255 s** | **24.324 s** | - | **1.99x faster** | - |
+| **Total (10 shared cases)** | **12.115 s** | **24.147 s** | **18.430 s** | **1.99x faster** | **1.52x faster** |
+
+Geometric mean of per-case speedups: **1.48x** vs ScrapComputers (11 cases) and **1.21x** vs SComputers (10 shared cases).
 
 These are **transcribed in-game console logs**, not CI artifacts: Scrap Mechanic
 cannot be scripted from this repository. The verbatim transcripts and the
 reproduction steps are in [`benchmarks/in-game/README.md`](benchmarks/in-game/README.md).
-Single session, single machine; treat sub-5% differences as noise.
+Single session, single machine; treat sub-5% differences as noise. GoogiVM is
+clearly slower in `10k string concatenations` and slightly slower in
+`1M branch/mod` against SComputers.
 
-SComputers reports only 10 cases: its sandbox does not expose table metatables,
-so `100k metatable adds` is missing and its total is not comparable with the
-11-case totals. GoogiVM is compared against it on the 10 shared cases only.
+SComputers fails `100k metatable adds` outright (`attempt to perform arithmetic
+on local 'lhs'`): its VM does not implement the `__add` metamethod, so it has
+only 10 valid cases and is compared on those.
 
 ### 2. 50-Case Head-to-Head Suite (`BENCHMARK_50.md`)
 
