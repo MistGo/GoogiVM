@@ -52,7 +52,7 @@ When a local variable is declared, the compiler emits a `NOP` placeholder (`cell
 
 ---
 
-## 4. Bytecode & Superinstructions (Opcodes 1–161)
+## 4. Bytecode & Superinstructions (Opcodes 1–163)
 
 ### Base Opcodes (`1–51`)
 
@@ -68,7 +68,7 @@ When a local variable is declared, the compiler emits a `NOP` placeholder (`cell
 | `36–43` | `NEWTABLE`, `FIELD`, `INDEX`, `SETFIELD`, `SETINDEX`, `SELF`, `SETLIST`, `SETLISTMULTI` | Table creation, reads, writes, methods, and array initializers |
 | `44–50` | `MARK`, `POP`, `FORPREP`, `FORLOOP`, `CLOSURE`, `PEEK`, `NOP` | Multi-return markers, numeric `for`, closures, and stack helpers |
 
-### Fused Superinstructions (`52–161`)
+### Fused Superinstructions (`52–163`)
 
 `optimize_code(co, n)` runs after a function is compiled. **It never shifts instruction addresses:** it overwrites the first instruction of a matched pattern and marks the remaining `len - 1` instruction slots in `dead[]`. The VM advances `pc` by `4 * len` (e.g., `+8`, `+12`, `+16`, `+20`, `+24`, `+32`, `+36`, `+40`, `+48`, `+56`, `+72`, or `+96`).
 
@@ -92,6 +92,7 @@ Several opcode families share one opcode and carry a **kind** in a dead slot (`C
 | `157` | `SWAP` | `a, b = b, a` |
 | `158–159` | `ASSIGN_MOD_ADD_RK`, `SETINDEX_MOD_RK` | `s = (s + i) % k` and `t[i % k] = v` |
 | `160–161` | `CLOSURE_CELL`, `SETINDEX_CLOSURE_CELL` | Per-iteration boxed loop variable plus closure creation, and `t[i] = function() return i end` |
+| `162–163` | `FORLOOP_ASSIGN_RR`, `FORLOOP_ASSIGN_RK` | Numeric `for` step fused with a loop-body assignment for `*`, `/`, `%`, `^` and `..`; the operator rides in the dead slot (`13`–`19` encoding) |
 
 Ranges `95–101`, `104–109` and `120–131` are retired: they were folded into `ASSIGN_*` (154–156) and `JMPF_CMP_*` (151–153).
 

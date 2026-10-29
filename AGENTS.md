@@ -78,7 +78,7 @@ source
 Important details:
 
 - Instructions are stored as four numbers: `{OPCODE, A, B, C}`.
-- Normal opcodes are 1–51; fused opcodes are 52–161 (85 defined; 95–101, 104–109 and 120–131 were folded into `ASSIGN_*` and `JMPF_CMP_*`).
+- Normal opcodes are 1–51; fused opcodes are 52–163 (87 defined; 95–101, 104–109 and 120–131 were folded into `ASSIGN_*` and `JMPF_CMP_*`).
 - Fused instructions skip dead slots; the program counter can advance by 8, 12, 16, 20, 24, 32, 36, 40, 48, 56, 72, or 96 numbers.
 - The dispatch loop is a generated balanced range tree over the opcode number (leaves of at most four exact tests), not a linear `if/elseif` chain.
 - The optimizer does not shift code. It overwrites the first slot and marks the rest dead.
