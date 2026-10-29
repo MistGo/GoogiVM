@@ -1,41 +1,40 @@
 # Test Suite (`tests/`)
 
-This directory contains the automated test suite for **GoogiVM** (`custom_loadstring_full.lua`).
+This directory contains the automated verification suite for **GoogiVM** (`custom_loadstring_full.lua`).
 
-Run the entire suite from the repository root:
+## Running the Tests
+
+From the repository root:
 
 ```bash
 luajit run_all_tests.lua
-```
-
-or with standard Lua:
-
-```bash
 lua run_all_tests.lua
 ```
 
-## Structure
+- **LuaJIT 2.1 (primary target):** `18,681 checks, 0 failed`
+- **Lua 5.4 (compatibility target):** `18,663 checks, 0 failed` (18 checks that depend on Lua 5.1 `getfenv`/`setfenv` or LuaJIT `__len` table semantics are skipped automatically when those features are absent).
 
-- `helpers.lua` — shared test harness (`expect`, `expect1`, `compile_error`, `runtime_error`, `compare` against the host `loadstring`/`load`).
-- `test_lexer.lua` — numbers (decimal, hex, scientific), strings, escape sequences, long strings, comments, operators, line numbers.
-- `test_syntax.lua` — valid and invalid Lua 5.1 syntax, rejection of Lua 5.2+ constructs (`goto`, `//`, labels).
-- `test_expressions.lua` — arithmetic, relational, logical (`and`/`or` short-circuit), concatenation, precedence, associativity.
-- `test_statements.lua` — `local`, globals, multiple assignment, `if`/`elseif`/`else`, `while`, `repeat`/`until`, numeric `for`, generic `for`, `break`, `do`/`end`, `return`.
-- `test_functions.lua` — parameters, recursion, closures, shared upvalues, mutation of outer locals, nested functions, methods (`:`).
-- `test_tables.lua` — array/hash/mixed table constructors, nested tables, trailing multireturn expansion.
-- `test_varargs_multiret.lua` — `...`, `select`, multiple return adjustment, truncation with `(...)`, calls in argument lists, returns, and table constructors.
-- `test_metatables.lua` — `__index`, `__newindex`, arithmetic metamethods, `__eq`, `__lt`, `__le`, `__concat`, `__unm`, `__call`, `__len` (where supported by the host).
-- `test_environment.lua` — environment isolation, `__index`/`__newindex` on `env`, `getfenv`/`setfenv` on levels and functions.
-- `test_errors.lua` — API validation, syntax error reporting, runtime error propagation, `pcall`/`xpcall`.
-- `test_host_interop.lua` — passing interpreted closures to `pcall`, `xpcall`, `table.sort`, `string.gsub`, `coroutine.*`, and C/host callbacks.
-- `test_regressions.lua` — tricky Lua 5.1 edge cases (`false` keys in generic `for`, per-iteration closure cells, upvalue backpatching, evaluation order, >60 upvalues).
-- `test_superinstructions.lua` — regression coverage for peephole fusions, loop-body fusions, conditional jumps, and side-effect ordering.
-- `test_fuzz.lua` — 18,000 differential tests (15,000 generated expressions + 3,000 generated programs) compared against the host Lua compiler.
-- `test_stress.lua` — deep recursion (5,000 frames), 150 locals, 1,000-element table constructors, 100-argument functions, 100-value returns, long strings.
-- `test_limits.lua` — compile/runtime resource limits (`maxSourceBytes`, `maxCodeSlots`, `maxInstructions`, `maxCallDepth`, `maxStack`, `maxArgs`, `maxReturns`), native `getfenv`/`setfenv` protection, and source-line tracebacks.
-- `test_tailcalls.lua` — frame-reusing tail calls (`return f(...)`), mutual tail recursion, vararg/method tail calls, and native tail calls.
+---
 
-## Expected Check Counts
+## Test Modules (17 Suites)
 
-- **LuaJIT 2.1:** `18,681 checks, 0 failed`
-- **Lua 5.4:** `18,663 checks, 0 failed` (checks requiring `getfenv`/`setfenv` or Lua 5.1-specific `__len` behavior are skipped automatically).
+| Module | Checks (LuaJIT) | Coverage |
+|---|---:|---|
+| `test_lexer.lua` | 77 | Decimal/hex/scientific numbers, malformed numbers (`1..2`, `0x1..2`), short/long strings, escapes, comments, operators, line tracking |
+| `test_syntax.lua` | 154 | Valid and invalid Lua 5.1 grammar, rejection of Lua 5.2+ features (`goto`, `::label::`, `//`) |
+| `test_expressions.lua` | 83 | Arithmetic, relational, logical short-circuit (`and`/`or`), concatenation, unary ops, precedence |
+| `test_statements.lua` | 53 | Locals, globals, multiple assignment, `if`/`elseif`/`else`, `while`, `repeat`/`until`, numeric & generic `for`, `break`, `do`, `return` |
+| `test_functions.lua` | 30 | Parameters, recursion, closures, mutable shared upvalues, method definitions & calls (`:`) |
+| `test_tables.lua` | 41 | List, hash, and mixed table constructors, nested tables, multi-return tail expansion (`{1, f()}`) |
+| `test_varargs_multiret.lua` | 47 | `...`, `select`, multi-return adjustment, `(f())` truncation, varargs in calls/returns/tables |
+| `test_metatables.lua` | 23 | `__index`, `__newindex`, `__add`..`__pow`, `__unm`, `__concat`, `__eq`, `__lt`, `__le`, `__call`, `__len`, `__tostring` |
+| `test_environment.lua` | 28 | Sandbox isolation, empty default `env`, `env` metatables, `getfenv`/`setfenv` across stack levels and closures |
+| `test_errors.lua` | 37 | API argument validation, syntax errors with line numbers, runtime error propagation through `pcall`/`xpcall` |
+| `test_host_interop.lua` | 17 | Interop with host `pcall`, `table.sort`, `string.gsub`, `coroutine.create`/`resume`/`wrap`, and C callbacks |
+| `test_regressions.lua` | 18 | Edge cases: `false` iterator keys, per-iteration captured loop cells, upvalue backpatching, evaluation order, 100 upvalues |
+| `test_superinstructions.lua` | 24 | Peephole fusions: arithmetic/compound assignments, table reads/writes, `while`/`for` branches, `ipairs` cells, metamethod preservation |
+| `test_fuzz.lua` | 18,000 | Differential fuzzing against native `loadstring`/`load`: 15,000 random expressions + 3,000 random multi-statement programs |
+| `test_stress.lua` | 14 | 5,000-deep recursion, 150 locals, 1,000-element table constructors, 120 parameters, 100 return values, 100 KB strings |
+| `test_limits.lua` | 18 | `maxSourceBytes`, `maxCodeSlots`, `maxInstructions`, `maxCallDepth`, `maxStack`, `maxArgs`, `maxReturns`, native `getfenv`/`setfenv` rejection, source-line tracebacks |
+| `test_tailcalls.lua` | 17 | Frame-reusing tail calls (`return f(...)`), 100,000-step self & mutual tail recursion under `maxCallDepth = 10`, vararg/method/native tail calls |
+| **Total** | **18,681** | **All modules pass with 0 failures** |

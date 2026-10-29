@@ -1,175 +1,101 @@
-# Technical overview
+# GoogiVM Technical Guide
 
-This is a short implementation guide for **GoogiVM**. For usage, see [`README.md`](README.md).
+This document explains how **GoogiVM** (`custom_loadstring_full.lua`) compiles and executes Lua 5.1 source code. For public API usage and benchmarks, see [`README.md`](README.md).
 
-The whole runtime is in one file: `custom_loadstring_full.lua`. It contains the lexer, parser, bytecode emitter, peephole optimizer, and virtual machine.
+---
 
-## Pipeline
+## 1. Execution Pipeline
 
-```text
-Lua source
-  -> integrated lexer + recursive-descent parser
-  -> per-function bytecode prototypes
-  -> linear peephole optimizer
-  -> native Lua closure + weak metadata
-  -> stack VM with explicit call frames
-```
-
-There is no AST. The parser emits bytecode while it parses.
-
-## Compiler
-
-The lexer keeps only the current token (`tk`), its value (`tv`), its source position (`tp`), and the scanner position (`pos`). It does not build a token array.
-
-Each function is compiled into a frame context (`fc`) containing:
-
-- `code` — flat bytecode array;
-- `consts` — 1-based constant table;
-- `locals` — active local descriptors;
-- `upvals` — captured upvalue descriptors;
-- `nextreg` / `maxreg` — local register allocation;
-- `loop_breaks` — pending `break` jumps.
-
-A base instruction is four numbers:
+Everything lives in a single file (`custom_loadstring_full.lua`) with five logical stages:
 
 ```text
-[OPCODE, A, B, C]
+Lua 5.1 Source String
+  -> 1. Streaming Lexer (`advance`, `read_number`, `read_string`)
+  -> 2. Single-Pass Recursive-Descent Compiler (`parse_stmt`, `compile_expr`)
+  -> 3. Per-Function Bytecode Prototype (`code`, `consts`, `updesc`, `lines`)
+  -> 4. Peephole Superinstruction Optimizer (`optimize_code`)
+  -> 5. Explicit-Frame Stack/Register Virtual Machine (`run_closure`)
 ```
 
-A local variable occupies a frame-relative register. If a nested function captures it, the compiler:
+There is no intermediate AST. Bytecode is emitted directly during parsing.
 
-1. replaces its `NOP` placeholder with `CELL`;
-2. rewrites `GETLOCAL`/`SETLOCAL` accesses to `GETCELL`/`SETCELL`;
-3. shares the resulting `{ v = value }` cell with the nested closure.
+---
 
-Function prototypes are stored in a shared prototype list. The root chunk is itself a vararg prototype with no fixed parameters.
+## 2. Lexer & Source Line Mapping
 
-## Bytecode
+- The scanner maintains only the current token (`tk`), its semantic value (`tv`), its byte offset (`tp`), the previous token's byte offset (`last_tp`), and the cursor (`pos`).
+- Before scanning, `compile()` builds an array of newline offsets (`line_starts`).
+- Whenever `emit()` writes an instruction, it records `line_of(last_tp)` (via binary search over `line_starts`) into `fc.lines[pc]`.
+- Number scanning validates adjacent dots (`1..2`, `0x1..2`) as syntax errors while allowing string concatenation (`1 .. 2`).
 
-Normal opcodes are numbered **1–51**. Fused opcodes produced by the optimizer are numbered **52-146** and grouped by purpose:
+---
 
-| Range | Purpose |
-|---:|---|
-| 52–57 | local moves and simple stores |
-| 58–69 | arithmetic with register/constant operands |
-| 70–87 | comparisons |
-| 88–94 | table/index reads and writes |
-| 95–101 | compound assignment patterns |
-| 102–109, 120–131 | conditional jumps |
-| 110–118, 145–146 | numeric-for loop-variable copies and fused loop-body operations |
-| 119, 142 | fused modulo/equality branches |
-| 132–133 | generic-for (`ipairs`/`pairs`/iterator) fused loops |
-| 134–141, 143–144 | table constructor, boolean store, and metamethod-aware binary accumulate fusions |
+## 3. Compiler & Function Prototypes
 
-The bytecode is private. It is not serialized, has no stable ABI, and should not be persisted between versions.
+Each function (including the top-level chunk, which is compiled as an implicit `...` vararg function) has a compilation context `fc`:
 
-## Peephole optimizer
+- `code` — flat 1-based numeric array; every base instruction occupies 4 numbers: `[OPCODE, A, B, C]`.
+- `consts` / `cmap` — deduplicated constant pool (`K`).
+- `locals` — active local variable descriptors (`name`, `slot`, `captured`, `cell_pc`, `access`).
+- `upvals` — upvalue descriptors (`name`, `instack`, `idx`).
+- `nextreg` / `maxreg` — frame-relative register allocator for locals and temporaries.
+- `loop_breaks` — per-loop lists of pending `break` jump addresses to patch at loop exit.
 
-`optimize_code` runs after a function has been fully compiled. It first records jump targets, then fuses common instruction sequences.
+### Upvalues and Heap-Cell Backpatching
 
-Key rule: **the optimizer does not shift code**. It writes the fused instruction into the first slot and marks the following slots dead. The VM skips those dead slots:
+Un-captured local variables live directly in frame registers `S[base + slot - 1]` and are read/written with `GETLOCAL`/`SETLOCAL`.
 
-- 2 slots → `pc + 8`;
-- 3 slots → `pc + 12`;
-- 4 slots → `pc + 16`;
-- 6 slots → `pc + 24`.
+When a local variable is declared, the compiler emits a `NOP` placeholder (`cell_pc`) and records every `GETLOCAL`/`SETLOCAL` PC in `desc.access`. If an inner function captures that local:
+1. `mark_captured(desc)` patches `co[desc.cell_pc]` from `NOP` to `CELL` (which wraps the register value in `{ v = value }`).
+2. All previously emitted `GETLOCAL`/`SETLOCAL` instructions for that variable are backpatched to `GETCELL`/`SETCELL`, and future accesses emit `GETCELL`/`SETCELL` directly.
+3. Both outer and inner closures share the same `{ v = value }` table cell.
 
-A fusion is never allowed to cross a jump target. `can()` checks the target and dead-slot maps before a pattern is applied.
+---
 
-The optimizer also folds a numeric-for loop-variable copy into `FORLOOP_MOV` or `FORLOOP_CELL`. The first iteration still uses the body copy; later iterations are handled by the loop opcode.
+## 4. Bytecode & Superinstructions (Opcodes 1–146)
 
-For the hottest numeric loops it further folds the first body operation into the loop opcode: `sum = sum + i`, `t[i] = i`, `sum = sum + t[i]`, and similar patterns. The loop opcode then performs the increment, the body operation, and the next dispatch in one VM iteration. `(value % K) == K2` followed by a conditional jump is folded into `JMPF_MOD_EQ_K`, which also avoids the intermediate stack push/pop.
+### Base Opcodes (`1–51`)
 
-## VM
+| Range | Opcodes | Purpose |
+|---:|---|---|
+| `1–3` | `LOADK`, `LOADBOOL`, `LOADNIL` | Push constants, booleans, and `nil`s |
+| `4–8` | `GETLOCAL`, `SETLOCAL`, `GETCELL`, `SETCELL`, `CELL` | Local register and captured-cell access |
+| `9–12` | `GETUPVAL`, `SETUPVAL`, `GETGLOBAL`, `SETGLOBAL` | Upvalues and `env` table globals |
+| `13–22` | `ADD`..`POW`, `CONCAT`, `UNM`, `NOT`, `LEN` | Arithmetic, string concat, and unary operators |
+| `23–28` | `EQ`, `NE`, `LT`, `LE`, `GT`, `GE` | Relational operators |
+| `29–32`, `51` | `TESTF`, `TESTT`, `JMPF`, `JMP`, `JMPNIL` | Short-circuit logical tests and jumps |
+| `33–35` | `CALLD`, `RET`, `VARARG` | Function calls (including tail calls), returns, and `...` |
+| `36–43` | `NEWTABLE`, `FIELD`, `INDEX`, `SETFIELD`, `SETINDEX`, `SELF`, `SETLIST`, `SETLISTMULTI` | Table creation, reads, writes, methods, and array initializers |
+| `44–50` | `MARK`, `POP`, `FORPREP`, `FORLOOP`, `CLOSURE`, `PEEK`, `NOP` | Multi-return markers, numeric `for`, closures, and stack helpers |
 
-A top-level invocation creates:
+### Fused Superinstructions (`52–146`)
 
-- `S` — shared value stack;
-- `top` — current stack top;
-- `frames` — explicit call frames;
-- `base` — current frame base;
-- `pc` — program counter;
-- `C`, `K`, `U` — current code, constants, upvalues;
-- `e` — current environment.
+`optimize_code(co, n)` runs after a function is compiled. **It never shifts instruction addresses:** it overwrites the first instruction of a matched pattern and marks the remaining `len - 1` instruction slots in `dead[]`. The VM advances `pc` by `4 * len` (e.g., `+8`, `+12`, `+16`, `+20`, `+24`, `+40`, `+48`, `+56`, `+72`, or `+96`).
 
-The VM loop uses local aliases for these values because table lookups in the dispatch loop would dominate performance.
+A fusion is only applied if `can(pos, len)` confirms that none of the interior slots is a jump target (`targets[]`) or already dead.
 
-### Calls
+| Range | Superinstructions | What They Fuse |
+|---:|---|---|
+| `52–57`, `144` | `MOVLOCAL`, `MOVLOCAL_NOP`, `MOVLOCAL_CELL`, `SETLOCAL_K`, `SETLOCAL_BOOL`, `SETLOCAL_INDEX`, `SETLOCAL_FIELD` | Direct local-to-local moves, constant/boolean stores, and `dest = t[k]` / `dest = t.field` without stack push/pop |
+| `58–87` | `ADD_RR`/`RK` .. `POW_RR`/`RK`, `EQ_RR`/`RK` .. `GE_RR`/`RK`, `EQ_K` .. `GE_K` | Binary arithmetic and comparisons directly from local registers and constants |
+| `88–94` | `INDEX_RR`, `INDEX_RK`, `FIELD_R`, `SETINDEX_RR`, `SETINDEX_RK`, `SETFIELD_RV`, `SETFIELD_RK` | Single-dispatch table reads and writes (`t[k] = v`, `t.f = v`) |
+| `95–101`, `143` | `ADD_ASSIGN_RR`/`RK`/`INDEX`, `SUB_ASSIGN_RR`/`RK`, `MUL_ASSIGN_RR`/`RK`, `ADD_ASSIGN_BINOP_RR` | In-place accumulator updates (`s = s + i`, `s = s + t[i]`, `s = s + (a + b)` with in-VM `__add` metamethod frame push) |
+| `102–109`, `119–131`, `142` | `JMPF_LOCAL`, `JMPNIL_LOCAL`, `JMPF_EQ_K`..`GE_K`, `JMPF_EQ_RR`/`RK`..`GE_RR`/`RK`, `JMPF_MOD_EQ_K`, `JMPF_MOD_RR_EQ_K` | Zero-stack conditional branches (`while i < N`, `until i >= N`, `if x % d == 0`) |
+| `110–118`, `145–146` | `FORLOOP_MOV`, `FORLOOP_CELL`, `FORLOOP_ADD_RR`/`RK`/`INDEX`, `FORLOOP_SETINDEX_RR`/`RK`, `FORLOOP_SUB_RR`/`RK`, `FORLOOP_MOD_RR_EQ_K`, `FORLOOP_NEWTABLE_SETINDEX_R` | Numeric `for` step fused with loop-variable copy and the first loop-body statement/branch |
+| `132–133` | `TFOR_2`, `TFOR_1` | Full generic `for` header fused into 1 dispatch; runs `ipairs` and `pairs`/`next` directly in-VM without per-iteration function call overhead |
+| `134–141` | `NEWTABLE_LOCAL`, `SETLIST_R`, `SETLIST_K`, `SETLIST_ADD_RK`, `NEWTABLE_FIELD_R`/`K`, `NEWTABLE_SETINDEX_R`, `NEWTABLE_LIST3_ADD_RK` | Fast table allocation and inline array/hash constructor population |
 
-All calls use `CALLD`:
+---
 
-- a marker register stores the function's stack position;
-- arguments are above the function value;
-- the result count is `-1` (all), `0` (none), or an exact number.
+## 5. Virtual Machine (`run_closure`)
 
-For a custom closure, the VM pushes a new explicit frame, shifts arguments into parameter slots, clears the callee's local registers, and continues the same dispatch loop. Custom-to-custom calls do not recurse through the host once per call.
-
-A `return f(...)` call is marked in the unused `C` operand of `CALLD`. For an interpreted target, the VM replaces the current frame instead of pushing a new one, carrying over `ret_sp` and `wanted`; for a native target, results are moved to the expression area and the following `RET` unwinds the current frame. This is tail-call optimization without changing the normal call protocol.
-
-Native functions use fast paths for 0/1/2 arguments and `unpack` for larger argument lists.
-
-### Closures and multiple returns
-
-A closure is a real Lua function whose prototype/upvalue/environment metadata lives in the weak-key `closure_info` table. Upvalues point to cells when a value is shared.
-
-Multiple returns use `MARK`, `POP`, `PEEK`, `VARARG`, and `SETLISTMULTI`. The compiler tracks `top_multi` / `last_multi_pc` and patches the requested result count when the surrounding expression list is known.
-
-### Tables and metatables
-
-Table reads and writes use the host's normal `t[k]` operations. Arithmetic, comparison, concatenation, length, and `__call` therefore use host metamethod semantics; the VM does not implement a second metamethod engine.
-
-### Environment
-
-Global reads and writes use the supplied `env` table directly, so `__index` and `__newindex` work. The default is an empty table, never `_G`.
-
-`getfenv`/`setfenv` are special-cased in `CALLD` when the host provides them. `setfenv(0, ...)` is intentionally rejected. Native function environments are not exposed through the sandbox: `getfenv(nativeFn)` and `setfenv(nativeFn, ...)` fail with an error.
-
-### Budgets
-
-`custom_loadstring` accepts an optional third `options` table. Compile-time checks cover source size and bytecode slots. Runtime checks cover instruction count, interpreted call depth, value-stack index, argument count, and return-value count. All limits are enabled by default and can be individually disabled with `math.huge`.
-
-### LuaJIT compatibility
-
-LuaJIT 2.1 can intermittently miscompile the base comparison path inside the large VM function under long fuzz workloads. Base comparisons are therefore routed through a small function that is explicitly `jit.off` when the `jit` API is present, and fused ordering-comparison opcodes are disabled on such hosts. Equality and inequality fusions remain enabled. Arithmetic and loops remain JIT-compiled.
-
-### Errors and source map
-
-Syntax errors are caught by `pcall(compile)` and returned as `nil, message`. Every prototype carries `sourceName` and a `lines` table populated by `emit`. Runtime string errors are mapped to `sourceName:line` and include interpreted call frames; non-string error objects are preserved unchanged.
-
-### Source map
-
-Compile-time line tracking builds `line_starts` once per chunk and uses binary search in `line_of`. `emit` records the line of the last consumed token, which avoids the common “next token” off-by-one for expressions. Runtime tracing updates the current frame and program counter before each instruction so the error path can report the interpreted location.
-
-## Implementation map
-
-Useful places in `custom_loadstring_full.lua`:
-
-| Area | Functions |
-|---|---|
-| Lexer | `advance`, `skip_space`, string/number scanners |
-| Parser | `parse_stmt`, `parse_block`, `compile_expr` |
-| Emitter | `emit`, `new_fc`, `compile_funcbody` |
-| Optimizer | `optimize_code`, `try_stmt`, `try_expr` |
-| VM | `run_closure` |
-| API | `custom_loadstring` |
-
-## Changing the implementation
-
-Before adding a fused opcode:
-
-1. choose an unused number and add it to `FOP`;
-2. add a dispatch branch in `run_closure`;
-3. add a pattern in `optimize_code`;
-4. make the `pc` skip match `put()`;
-5. add a test in `tests/test_superinstructions.lua`;
-6. run both test commands from the README.
-
-Never fuse across a jump target and never skip a live instruction.
-
-## Known limits
-
-- Wall-clock timeout and memory quota are not provided; instruction/call-depth/stack budgets are available, but external process isolation is still recommended.
-- No bytecode serialization.
-- No Lua 5.2+ grammar.
-- Non-tail recursion is bounded by `maxCallDepth` and the VM value stack; `return f(...)` reuses the current frame.
-- Behavior of `#` on sparse tables and some metamethod edge cases is host-defined.
+- **Shared Stack (`S`) & Explicit Frames (`frames`):**
+  All active interpreted functions share a single Lua table `S`. Frame `fi` has its local registers at `S[base .. base + maxreg - 1]` and its expression stack above `base + maxreg - 1`.
+- **Frame Pooling (`free_frames`):**
+  Returning from an interpreted call recycles the frame table into `free_frames` (up to 64 entries), eliminating table allocations on hot call paths (`fib`, recursion, closures).
+- **Tail-Call Optimization (`CALLD` with `C = 1`):**
+  `parse_return` marks `return f(...)` calls with `C = 1`. When `f` is an interpreted closure, `CALLD` overwrites `cur` in place and jumps to `pc = 1` without growing `fi` or consuming `maxCallDepth`.
+- **Fast Callback Entry (`info.fast`):**
+  Root chunks wrap `run_closure` in `pcall` to format runtime errors with `format_runtime_error(err, trace)`. Inner closures (such as `__add` metamethods or `table.sort` comparators) set `info.fast = true` and invoke `run_closure` directly when called from the host.
+- **LuaJIT 2.1 Comparison Workaround:**
+  LuaJIT 2.1 has an upstream JIT compiler bug that can intermittently miscompile ordered relational comparisons inside large dispatch functions. GoogiVM isolates ordered comparisons in a small `compare_op` helper marked with `jit.off(compare_op)` when `jit` is present, while keeping equality/inequality fusions and arithmetic loops fully JIT-compiled.
