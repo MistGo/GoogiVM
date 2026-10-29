@@ -97,6 +97,10 @@ local FOP = {
     JMPF_GT_K = 108, JMPF_GE_K = 109,
 
     FORLOOP_MOV = 110, FORLOOP_CELL = 111,
+    FORLOOP_ADD_RR = 112, FORLOOP_ADD_RK = 113,
+    FORLOOP_ADD_INDEX = 114,
+    FORLOOP_SETINDEX_RR = 115, FORLOOP_SETINDEX_RK = 116,
+    FORLOOP_SUB_RR = 117, FORLOOP_SUB_RK = 118,
 }
 
 local run_closure
@@ -158,7 +162,7 @@ local function format_runtime_error(err, trace)
     return out
 end
 
-local function make_closure(proto, upvals, fenv)
+local function make_closure(proto, upvals, fenv, set_native_env)
     local function closure(...)
         local trace = {}
         local result = pack(pcall(run_closure, closure, trace, ...))
@@ -169,7 +173,9 @@ local function make_closure(proto, upvals, fenv)
     end
     local env = fenv or proto.env
     local native_env = false
-    if setfenv then
+    -- Only the root chunk needs a native Lua fenv for host getfenv/setfenv.
+    -- Nested closures resolve getfenv/setfenv through closure_info instead.
+    if set_native_env and setfenv then
         native_env = pcall(setfenv, closure, env)
     end
     closure_info[closure] = {
@@ -237,6 +243,10 @@ run_closure = function(fn, trace, ...)
     local F_JMPF_LT_K, F_JMPF_LE_K = 106, 107
     local F_JMPF_GT_K, F_JMPF_GE_K = 108, 109
     local F_FORLOOP_MOV, F_FORLOOP_CELL = 110, 111
+    local F_FORLOOP_ADD_RR, F_FORLOOP_ADD_RK = 112, 113
+    local F_FORLOOP_ADD_INDEX = 114
+    local F_FORLOOP_SETINDEX_RR, F_FORLOOP_SETINDEX_RK = 115, 116
+    local F_FORLOOP_SUB_RR, F_FORLOOP_SUB_RK = 117, 118
 
     local info = closure_info[fn]
     local p = info.p
@@ -253,6 +263,8 @@ run_closure = function(fn, trace, ...)
     local top = 0
     local frames = {}
     local fi = 1
+    local free_frames = {}
+    local free_frame_count = 0
 
     local base = 1
     local maxreg = p.maxreg
@@ -353,6 +365,138 @@ run_closure = function(fn, trace, ...)
                     S[r] = idx
                     S[base + C[pc + 2] - 1] = { v = idx }
                     pc = C[pc + 3]
+                else
+                    pc = pc + 4
+                end
+
+            elseif op == F_FORLOOP_ADD_RR then
+                local r = base + C[pc + 1] - 1
+                local step = S[r + 2]
+                local limit = S[r + 1]
+                local idx = S[r] + step
+                if (step > 0 and idx <= limit) or
+                   (step < 0 and idx >= limit) then
+                    S[r] = idx
+                    S[base + C[pc + 2] - 1] = idx
+                    local body = C[pc + 3]
+                    local a = base + C[body + 13] - 1
+                    local b = base + C[body + 14] - 1
+                    S[a] = S[a] + S[b]
+                    local nxt = body + 28
+                    if nxt ~= pc then pc = nxt end
+                else
+                    pc = pc + 4
+                end
+
+            elseif op == F_FORLOOP_ADD_RK then
+                local r = base + C[pc + 1] - 1
+                local step = S[r + 2]
+                local limit = S[r + 1]
+                local idx = S[r] + step
+                if (step > 0 and idx <= limit) or
+                   (step < 0 and idx >= limit) then
+                    S[r] = idx
+                    S[base + C[pc + 2] - 1] = idx
+                    local body = C[pc + 3]
+                    local a = base + C[body + 13] - 1
+                    S[a] = S[a] + K[C[body + 14]]
+                    local nxt = body + 28
+                    if nxt ~= pc then pc = nxt end
+                else
+                    pc = pc + 4
+                end
+
+            elseif op == F_FORLOOP_ADD_INDEX then
+                local r = base + C[pc + 1] - 1
+                local step = S[r + 2]
+                local limit = S[r + 1]
+                local idx = S[r] + step
+                if (step > 0 and idx <= limit) or
+                   (step < 0 and idx >= limit) then
+                    S[r] = idx
+                    S[base + C[pc + 2] - 1] = idx
+                    local body = C[pc + 3]
+                    local a = base + C[body + 13] - 1
+                    local t = S[base + C[body + 14] - 1]
+                    local k = S[base + C[body + 15] - 1]
+                    S[a] = S[a] + t[k]
+                    local nxt = body + 36
+                    if nxt ~= pc then pc = nxt end
+                else
+                    pc = pc + 4
+                end
+
+            elseif op == F_FORLOOP_SETINDEX_RR then
+                local r = base + C[pc + 1] - 1
+                local step = S[r + 2]
+                local limit = S[r + 1]
+                local idx = S[r] + step
+                if (step > 0 and idx <= limit) or
+                   (step < 0 and idx >= limit) then
+                    S[r] = idx
+                    S[base + C[pc + 2] - 1] = idx
+                    local body = C[pc + 3]
+                    local t = S[base + C[body + 13] - 1]
+                    local k = S[base + C[body + 14] - 1]
+                    t[k] = S[base + C[body + 15] - 1]
+                    local nxt = body + 36
+                    if nxt ~= pc then pc = nxt end
+                else
+                    pc = pc + 4
+                end
+
+            elseif op == F_FORLOOP_SETINDEX_RK then
+                local r = base + C[pc + 1] - 1
+                local step = S[r + 2]
+                local limit = S[r + 1]
+                local idx = S[r] + step
+                if (step > 0 and idx <= limit) or
+                   (step < 0 and idx >= limit) then
+                    S[r] = idx
+                    S[base + C[pc + 2] - 1] = idx
+                    local body = C[pc + 3]
+                    local t = S[base + C[body + 13] - 1]
+                    local k = S[base + C[body + 14] - 1]
+                    t[k] = K[C[body + 15]]
+                    local nxt = body + 36
+                    if nxt ~= pc then pc = nxt end
+                else
+                    pc = pc + 4
+                end
+
+            elseif op == F_FORLOOP_SUB_RR then
+                local r = base + C[pc + 1] - 1
+                local step = S[r + 2]
+                local limit = S[r + 1]
+                local idx = S[r] + step
+                if (step > 0 and idx <= limit) or
+                   (step < 0 and idx >= limit) then
+                    S[r] = idx
+                    S[base + C[pc + 2] - 1] = idx
+                    local body = C[pc + 3]
+                    local a = base + C[body + 13] - 1
+                    local b = base + C[body + 14] - 1
+                    S[a] = S[a] - S[b]
+                    local nxt = body + 28
+                    if nxt ~= pc then pc = nxt end
+                else
+                    pc = pc + 4
+                end
+
+            elseif op == F_FORLOOP_SUB_RK then
+                local r = base + C[pc + 1] - 1
+                local step = S[r + 2]
+                local limit = S[r + 1]
+                local idx = S[r] + step
+                if (step > 0 and idx <= limit) or
+                   (step < 0 and idx >= limit) then
+                    S[r] = idx
+                    S[base + C[pc + 2] - 1] = idx
+                    local body = C[pc + 3]
+                    local a = base + C[body + 13] - 1
+                    S[a] = S[a] - K[C[body + 14]]
+                    local nxt = body + 28
+                    if nxt ~= pc then pc = nxt end
                 else
                     pc = pc + 4
                 end
@@ -972,18 +1116,40 @@ run_closure = function(fn, trace, ...)
 
                 local call_ret_sp = tail and cur.ret_sp or ret_sp
                 local call_wanted = tail and cur.wanted or nres
-                if not tail then
-                    cur.pc = pc + 4
-                    frames[fi] = cur
-                end
-                cur = {
-                    p = cp, ups = cpups, base = fpos, pc = 1,
-                    ret_sp = call_ret_sp, wanted = call_wanted, va = cva,
-                    env = cenv, cl = f,
-                }
                 if tail then
+                    -- Reuse the current frame table for a tail call.
+                    cur.p = cp
+                    cur.ups = cpups
+                    cur.base = fpos
+                    cur.pc = 1
+                    cur.ret_sp = call_ret_sp
+                    cur.wanted = call_wanted
+                    cur.va = cva
+                    cur.env = cenv
+                    cur.cl = f
                     frames[fi] = cur
                 else
+                    cur.pc = pc + 4
+                    frames[fi] = cur
+                    local nfree = free_frame_count
+                    local frame
+                    if nfree > 0 then
+                        frame = free_frames[nfree]
+                        free_frames[nfree] = nil
+                        free_frame_count = nfree - 1
+                    else
+                        frame = {}
+                    end
+                    frame.p = cp
+                    frame.ups = cpups
+                    frame.base = fpos
+                    frame.pc = 1
+                    frame.ret_sp = call_ret_sp
+                    frame.wanted = call_wanted
+                    frame.va = cva
+                    frame.env = cenv
+                    frame.cl = f
+                    cur = frame
                     fi = fi + 1
                     frames[fi] = cur
                 end
@@ -1191,6 +1357,7 @@ run_closure = function(fn, trace, ...)
             end
             top = dret + keep
 
+            local finished = cur
             frames[fi] = nil
             fi = fi - 1
             if fi == 0 then
@@ -1198,6 +1365,10 @@ run_closure = function(fn, trace, ...)
                     return
                 end
                 return unpack(S, 1, top)
+            end
+            if free_frame_count < 64 then
+                free_frame_count = free_frame_count + 1
+                free_frames[free_frame_count] = finished
             end
 
             cur = frames[fi]
@@ -1363,7 +1534,7 @@ run_closure = function(fn, trace, ...)
                 end
             end
             top = top + 1
-            S[top] = make_closure(cp, ups, e)
+            S[top] = make_closure(cp, ups, e, false)
             pc = pc + 4
 
         elseif op == PEEK then
@@ -1654,6 +1825,12 @@ local function custom_loadstring(source, env, opts)
                 local c2 = str_sub(source, p + 1, p + 1)
                 if c2 == "x" or c2 == "X" then
                     q = str_find(source, "[^%x]", p + 2) or (len + 1)
+                    if str_sub(source, q, q) == "." and
+                       str_sub(source, q + 1, q + 1) == "." then
+                        tp = p
+                        tv = str_sub(source, p, q + 1)
+                        fail("malformed number")
+                    end
                     local s = str_sub(source, p, q - 1)
                     local n = tonumber(str_sub(s, 3), 16)
                     if not n then
@@ -1676,6 +1853,13 @@ local function custom_loadstring(source, env, opts)
                    str_sub(source, q + 1, q + 1) ~= "." then
                     q = str_find(source, "[^%d]", q + 1) or (len + 1)
                 end
+            end
+
+            if str_sub(source, q, q) == "." and
+               str_sub(source, q + 1, q + 1) == "." then
+                tp = p
+                tv = str_sub(source, p, q + 1)
+                fail("malformed number")
             end
 
             local e = str_sub(source, q, q)
@@ -2375,6 +2559,48 @@ local function custom_loadstring(source, env, opts)
                 else
                     local np = try_expr(pos)
                     if np then pos = np else pos = pos + 4 end
+                end
+            end
+
+            -- Fold the first body operation into FORLOOP as well. This
+            -- removes one dispatch per iteration for the hot numeric-loop
+            -- patterns `sum = sum + i`, `t[i] = i`, and similar.
+            for pc = 1, n, 4 do
+                if co[pc] == FOP.FORLOOP_MOV then
+                    local ctrl = co[pc + 1]
+                    local dest = co[pc + 2]
+                    local body = co[pc + 3] - 12
+                    if body >= 1 and body + 28 <= n and
+                       not dead[body] and not dead[body + 12] and
+                       co[body + 2] == ctrl then
+                        local bop = co[body + 12]
+                        local fused, nxt
+                        if bop == FOP.ADD_ASSIGN_RR then
+                            fused, nxt = FOP.FORLOOP_ADD_RR, body + 28
+                        elseif bop == FOP.ADD_ASSIGN_RK then
+                            fused, nxt = FOP.FORLOOP_ADD_RK, body + 28
+                        elseif bop == FOP.ADD_ASSIGN_INDEX and
+                               body + 36 <= n then
+                            fused, nxt = FOP.FORLOOP_ADD_INDEX, body + 36
+                        elseif bop == FOP.SETINDEX_RR and
+                               body + 36 <= n then
+                            fused, nxt = FOP.FORLOOP_SETINDEX_RR, body + 36
+                        elseif bop == FOP.SETINDEX_RK and
+                               body + 36 <= n then
+                            fused, nxt = FOP.FORLOOP_SETINDEX_RK, body + 36
+                        elseif bop == FOP.SUB_ASSIGN_RR then
+                            fused, nxt = FOP.FORLOOP_SUB_RR, body + 28
+                        elseif bop == FOP.SUB_ASSIGN_RK then
+                            fused, nxt = FOP.FORLOOP_SUB_RK, body + 28
+                        end
+                        if fused then
+                            co[pc] = fused
+                            co[pc + 1] = ctrl
+                            co[pc + 2] = dest
+                            co[pc + 3] = body
+                            targets[nxt] = true
+                        end
+                    end
                 end
             end
         end
@@ -3444,7 +3670,7 @@ local function custom_loadstring(source, env, opts)
     if not ok then
         return nil, tostring(proto)
     end
-    return make_closure(proto, {}, env)
+    return make_closure(proto, {}, env, true)
 end
 
 return custom_loadstring

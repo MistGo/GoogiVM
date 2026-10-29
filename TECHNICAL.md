@@ -46,7 +46,7 @@ Function prototypes are stored in a shared prototype list. The root chunk is its
 
 ## Bytecode
 
-Normal opcodes are numbered **1–51**. Fused opcodes produced by the optimizer are numbered **52–111** and grouped by purpose:
+Normal opcodes are numbered **1–51**. Fused opcodes produced by the optimizer are numbered **52-118** and grouped by purpose:
 
 | Range | Purpose |
 |---:|---|
@@ -56,7 +56,7 @@ Normal opcodes are numbered **1–51**. Fused opcodes produced by the optimizer 
 | 88–94 | table/index reads and writes |
 | 95–101 | compound assignment patterns |
 | 102–109 | conditional jumps |
-| 110–111 | numeric-for loop-variable copies |
+| 110-118 | numeric-for loop-variable copies and fused loop-body operations |
 
 The bytecode is private. It is not serialized, has no stable ABI, and should not be persisted between versions.
 
@@ -74,6 +74,8 @@ Key rule: **the optimizer does not shift code**. It writes the fused instruction
 A fusion is never allowed to cross a jump target. `can()` checks the target and dead-slot maps before a pattern is applied.
 
 The optimizer also folds a numeric-for loop-variable copy into `FORLOOP_MOV` or `FORLOOP_CELL`. The first iteration still uses the body copy; later iterations are handled by the loop opcode.
+
+For the hottest numeric loops it further folds the first body operation into the loop opcode: `sum = sum + i`, `t[i] = i`, `sum = sum + t[i]`, and similar patterns. The loop opcode then performs the increment, the body operation, and the next dispatch in one VM iteration.
 
 ## VM
 

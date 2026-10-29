@@ -141,14 +141,14 @@ lua run_all_tests.lua
 
 Expected results:
 
-- LuaJIT: **18,678 checks**, 0 failed;
-- Lua 5.4: **18,660 checks**, 0 failed (some `setfenv`/`getfenv`/`__len` checks are skipped).
+- LuaJIT: **18,680 checks**, 0 failed;
+- Lua 5.4: **18,662 checks**, 0 failed (some `setfenv`/`getfenv`/`__len` checks are skipped).
 
 The `tests/` directory is only for development; it is not needed to use the library. Detailed test coverage is in [`tests/README.md`](tests/README.md).
 
 ## Performance
 
-On the project microbenchmarks, this interpreter was about **1.6x faster than FiOne** overall after the peephole/superinstruction work. It is still much slower than native LuaJIT, which is a different execution model. These are microbenchmarks, not a representative game workload.
+On the project microbenchmarks, this interpreter is roughly **2-3x faster than FiOne** on call-heavy, numeric-loop, and Fibonacci workloads. Table access is roughly **1.6x faster**; branch-heavy loops are slower under LuaJIT because the comparison workaround keeps them out of the JIT. It is still much slower than native LuaJIT, which is a different execution model. These are microbenchmarks, not a representative game workload.
 
 Tail calls reuse the current VM frame, so `return f(...)` does not grow the call-depth budget or the frame stack.
 

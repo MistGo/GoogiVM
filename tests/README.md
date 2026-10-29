@@ -42,7 +42,7 @@ lua run_all_tests.lua
 | `test_limits.lua` | отказ `getfenv`/`setfenv` для native-функций, лимиты исходника, байткода, инструкций, глубины вызовов, стека, аргументов и возвратов, sourceName, runtime line/traceback |
 | `test_tailcalls.lua` | tail recursion и mutual recursion с малым `maxCallDepth`, multi-return, native/method/vararg/table `__call`, non-tail return, ошибки и корутины |
 
-Итого: **18 678 проверок** на LuaJIT и **18 660 проверок** на Lua 5.4;
+Итого: **18 680 проверок** на LuaJIT и **18 662 проверок** на Lua 5.4;
 на 5.4 часть проверок `setfenv`/`getfenv` и `__len`-зависимостей
 автоматически пропускается.
 

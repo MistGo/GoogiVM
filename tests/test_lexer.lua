@@ -89,6 +89,8 @@ b"]=], "a\nb")
     t:compile_error("return $")
     t:compile_error("return 0x")
     t:compile_error("return 1.2.3")
+    t:compile_error("return 1..2")
+    t:compile_error("return 0x1..2")
     t:compile_error("return 1e")
 
     -- Numeric and string results that are easy to get wrong.

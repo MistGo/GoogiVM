@@ -58,8 +58,8 @@ LuaJIT is the primary target. Lua 5.4 is a compatibility smoke run; some `setfen
 
 Expected baseline:
 
-- LuaJIT: 18,678 checks, 0 failed.
-- Lua 5.4: 18,660 checks, 0 failed.
+- LuaJIT: 18,680 checks, 0 failed.
+- Lua 5.4: 18,662 checks, 0 failed.
 
 If `luajit` is unavailable in the environment, run the Lua suite and report that the primary host was not tested.
 
@@ -78,7 +78,7 @@ source
 Important details:
 
 - Instructions are stored as four numbers: `{OPCODE, A, B, C}`.
-- Normal opcodes are 1–51; fused opcodes are 52–111.
+- Normal opcodes are 1–51; fused opcodes are 52-118.
 - Fused instructions skip dead slots; the program counter can advance by 8, 12, 16, or 24 numbers.
 - The optimizer does not shift code. It overwrites the first slot and marks the rest dead.
 - Captured locals become heap cells (`GETCELL`/`SETCELL`); loop variables can get a fresh cell per iteration.
