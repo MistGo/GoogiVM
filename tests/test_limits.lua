@@ -1,0 +1,88 @@
+return function(t)
+    local unpack = unpack or table.unpack
+    local custom = t.custom
+
+    -- Native function environments must not be reachable through getfenv.
+    if getfenv then
+        local f, err = custom("return getfenv(getfenv)", { getfenv = getfenv })
+        t:check(f ~= nil, "getfenv native test compile: " .. tostring(err))
+        if f then
+            local ok = pcall(f)
+            t:check(not ok, "getfenv(native) must be rejected")
+        end
+    end
+
+    -- Native function environments must not be changed through setfenv.
+    if setfenv then
+        local f, err = custom("return setfenv(print, {})", {
+            setfenv = setfenv,
+            print = print,
+        })
+        t:check(f ~= nil, "setfenv native test compile: " .. tostring(err))
+        if f then
+            local ok = pcall(f)
+            t:check(not ok, "setfenv(native) must be rejected")
+        end
+    end
+
+    -- Options must be a table.
+    local f, err = custom("return 1", {}, 5)
+    t:check(f == nil and type(err) == "string", "non-table options rejected")
+
+    -- Invalid limits must be rejected.
+    f, err = custom("return 1", {}, { maxInstructions = -1 })
+    t:check(f == nil and type(err) == "string", "negative limit rejected")
+    f, err = custom("return 1", {}, { maxInstructions = 0 / 0 })
+    t:check(f == nil and type(err) == "string", "NaN limit rejected")
+
+    -- Compile-time source limit.
+    f, err = custom("return 123456789", {}, { maxSourceBytes = 4 })
+    t:check(f == nil and tostring(err):find("maxSourceBytes", 1, true) ~= nil,
+        "maxSourceBytes: " .. tostring(err))
+
+    -- Compile-time bytecode limit.
+    f, err = custom("return 1", {}, { maxCodeSlots = 1 })
+    t:check(f == nil and tostring(err):find("maxCodeSlots", 1, true) ~= nil,
+        "maxCodeSlots: " .. tostring(err))
+
+    -- Runtime instruction limit.
+    f = assert(custom("while true do end", {}, { maxInstructions = 1000 }))
+    t:check(not pcall(f), "maxInstructions must abort an infinite loop")
+
+    -- Runtime call-depth limit.
+    f = assert(custom([[
+local function f(n)
+    if n == 0 then return 0 end
+    return f(n - 1)
+end
+return f(100)
+]], {}, { maxCallDepth = 20 }))
+    t:check(not pcall(f), "maxCallDepth must abort deep recursion")
+
+    -- Runtime argument limit.
+    f = assert(custom([[
+local function f(...) return ... end
+return f(...)
+]], {}, { maxArgs = 10 }))
+    do
+        local args = {}
+        for i = 1, 50 do args[i] = i end
+        t:check(not pcall(f, unpack(args)), "maxArgs must reject too many arguments")
+    end
+
+    -- Runtime return-value limit.
+    f = assert(custom("return ...", {}, { maxReturns = 10 }))
+    do
+        local args = {}
+        for i = 1, 50 do args[i] = i end
+        t:check(not pcall(f, unpack(args)), "maxReturns must reject too many return values")
+    end
+
+    -- Runtime stack limit.
+    f = assert(custom("return ...", {}, { maxStack = 10 }))
+    do
+        local args = {}
+        for i = 1, 50 do args[i] = i end
+        t:check(not pcall(f, unpack(args)), "maxStack must reject a large stack")
+    end
+end

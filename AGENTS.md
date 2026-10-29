@@ -10,11 +10,12 @@ Public API:
 
 ```lua
 local custom_loadstring = dofile("custom_loadstring_full.lua")
-local chunk, err = custom_loadstring(source, env)
+local chunk, err = custom_loadstring(source, env, options)
 ```
 
 - `source` must be a string.
 - `env` is optional; `nil` means a fresh empty table, **not** `_G`.
+- `options` is optional and may contain execution/compile limits.
 - Success returns a callable function.
 - Compile failure returns `nil, error_string`.
 - Runtime errors propagate out of the chunk.
@@ -39,7 +40,7 @@ The test harness may use `loadstring`/`load`, `os.clock`, `print`, and `dofile`.
 | `custom_loadstring_full.lua` | Compiler + VM |
 | `run_all_tests.lua` | Test runner |
 | `tests/helpers.lua` | Shared test harness |
-| `tests/test_*.lua` | Test modules |
+| `tests/test_*.lua` | Test modules; `test_limits.lua` covers budgets and native-fenv rejection |
 | `README.md`, `README.ru.md` | User docs |
 | `TECHNICAL.md`, `TECHNICAL.ru.md` | Short implementation guide |
 | `LICENSE` | MIT |
@@ -57,8 +58,8 @@ LuaJIT is the primary target. Lua 5.4 is a compatibility smoke run; some `setfen
 
 Expected baseline:
 
-- LuaJIT: 18,644 checks, 0 failed.
-- Lua 5.4: 18,630 checks, 0 failed.
+- LuaJIT: 18,658 checks, 0 failed.
+- Lua 5.4: 18,640 checks, 0 failed.
 
 If `luajit` is unavailable in the environment, run the Lua suite and report that the primary host was not tested.
 

@@ -46,13 +46,14 @@ The environment is explicit. If you omit it, the chunk gets a fresh empty table,
 ## API
 
 ```lua
-local chunk, err = custom_loadstring(source, env)
+local chunk, err = custom_loadstring(source, env, options)
 ```
 
 | Argument | Type | Meaning |
 |---|---|---|
 | `source` | string | Lua 5.1 source code |
 | `env` | table or `nil` | Global environment; `nil` means a new empty table |
+| `options` | table or `nil` | Optional execution/compile limits |
 
 Returns:
 
@@ -67,6 +68,30 @@ if not ok then
     print("runtime error:", result)
 end
 ```
+
+### Options and limits
+
+The third argument is optional and backward compatible. It accepts positive numbers:
+
+| Option | Default | Meaning |
+|---|---:|---|
+| `maxSourceBytes` | 4 MiB | Maximum source size in bytes |
+| `maxCodeSlots` | 8,000,000 | Maximum bytecode slots per prototype |
+| `maxInstructions` | 50,000,000 | VM instructions per chunk invocation |
+| `maxCallDepth` | 10,000 | Maximum interpreted call depth |
+| `maxStack` | 1,000,000 | Maximum VM value-stack index |
+| `maxArgs` | 1,000 | Maximum arguments per call |
+| `maxReturns` | 1,000 | Maximum return values per return |
+
+```lua
+local chunk, err = custom_loadstring(source, env, {
+    maxInstructions = 5e6,
+    maxCallDepth = 500,
+    maxSourceBytes = 512 * 1024,
+})
+```
+
+Limits are enabled by default. Set a numeric option to `math.huge` to disable that individual limit. Unknown option keys are ignored. Invalid, zero, negative, or NaN values make compilation fail.
 
 The returned chunk can be called many times. Locals are fresh on every call; the environment table is shared.
 
@@ -87,12 +112,13 @@ Lua 5.2+ syntax such as `goto`, `//`, `_ENV`, and variable attributes is not sup
 
 This is a sandbox-first interpreter, **not a hardened security boundary**.
 
-- There is no CPU limit, timeout, or instruction budget.
-- There is no memory limit.
-- There is no stack-depth protection; there is no tail-call optimization.
+- The default instruction, call-depth, stack, argument, and return-value limits can be overridden through the options table.
+- There is no wall-clock timeout. For hostile code, use a separate process/worker with an external timeout.
+- There is no memory limit inside Lua.
+- Deep recursion is bounded by `maxCallDepth`, but there is still no tail-call optimization.
 - Any host function you put in `env` can do whatever that function can do.
 - Do not expose `os`, `io`, `debug`, `package`, `loadstring`, or FFI to untrusted code.
-- Do not expose `getfenv`/`setfenv` unless the script really needs them.
+- `getfenv`/`setfenv` are special-cased for interpreted closures. Accessing native function environments is rejected.
 
 For untrusted scripts, also use a separate process/worker, timeouts, and memory limits outside Lua.
 
@@ -112,8 +138,8 @@ lua run_all_tests.lua
 
 Expected results:
 
-- LuaJIT: **18,644 checks**, 0 failed;
-- Lua 5.4: **18,630 checks**, 0 failed (some `setfenv`/`getfenv`/`__len` checks are skipped).
+- LuaJIT: **18,658 checks**, 0 failed;
+- Lua 5.4: **18,640 checks**, 0 failed (some `setfenv`/`getfenv`/`__len` checks are skipped).
 
 The `tests/` directory is only for development; it is not needed to use the library. Detailed test coverage is in [`tests/README.md`](tests/README.md).
 

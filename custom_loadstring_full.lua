@@ -44,6 +44,18 @@ end
 
 local closure_info = setmetatable({}, { __mode = "k" })
 
+-- Default execution policy. All limits can be overridden per chunk through
+-- the optional third argument to custom_loadstring.
+local DEFAULT_LIMITS = {
+    maxSourceBytes = 4 * 1024 * 1024,
+    maxCodeSlots = 8 * 1024 * 1024,
+    maxInstructions = 50 * 1000 * 1000,
+    maxCallDepth = 10000,
+    maxStack = 1000000,
+    maxArgs = 1000,
+    maxReturns = 1000,
+}
+
 -- Fused ("super") opcodes produced by the post-compile peephole pass.
 -- All are >= 52; normal opcodes remain 1..51.
 local FOP = {
@@ -99,6 +111,7 @@ local function make_closure(proto, upvals, fenv)
     end
     closure_info[closure] = {
         p = proto, u = upvals, env = env, fenv = native_env,
+        limits = proto.limits,
     }
     return closure
 end
@@ -163,8 +176,14 @@ run_closure = function(fn, ...)
 
     local info = closure_info[fn]
     local p = info.p
+    local limits = info.limits or {}
+    local maxInstructions = limits.maxInstructions
+    local instructionBudget = maxInstructions
     local args = pack(...)
     local nargs = args.n
+    if limits.maxArgs and nargs > limits.maxArgs then
+        error("too many arguments", 0)
+    end
 
     local S = {}
     local top = 0
@@ -192,6 +211,9 @@ run_closure = function(fn, ...)
         S[i] = nil
     end
     top = maxreg
+    if limits.maxStack and top > limits.maxStack then
+        error("stack limit exceeded", 0)
+    end
 
     local cenv = info.env
     if info.fenv and getfenv then
@@ -211,6 +233,13 @@ run_closure = function(fn, ...)
     local pc = 1
 
     while true do
+        if instructionBudget then
+            instructionBudget = instructionBudget - 1
+            if instructionBudget == 0 then
+                error("instruction limit exceeded", 0)
+            end
+        end
+
         local op = C[pc]
 
         if op >= 52 then
@@ -827,7 +856,17 @@ run_closure = function(fn, ...)
             local ret_sp = fpos - 1
             local fci = closure_info[f]
 
+            if limits.maxArgs and nargs > limits.maxArgs then
+                error("too many arguments", 0)
+            end
+            if limits.maxStack and top > limits.maxStack then
+                error("stack limit exceeded", 0)
+            end
+
             if fci then
+                if limits.maxCallDepth and fi >= limits.maxCallDepth then
+                    error("call depth limit exceeded", 0)
+                end
                 local cp = fci.p
                 local cpups = fci.u
                 local cva = nil
@@ -906,7 +945,7 @@ run_closure = function(fn, ...)
                         if inf then
                             r = get_closure_env(arg)
                         else
-                            r = getfenv(arg)
+                            error("getfenv: native function environments are disabled", 0)
                         end
                     else
                         error("bad argument #1 to 'getfenv' (number or function expected)", 0)
@@ -962,7 +1001,7 @@ run_closure = function(fn, ...)
                                 end
                             end
                         else
-                            setfenv(target, newenv)
+                            error("setfenv: native function environments are disabled", 0)
                         end
                         r = target
                     else
@@ -1013,6 +1052,9 @@ run_closure = function(fn, ...)
                         else
                             rs = pack(f(unpack(S, fpos + 1, top)))
                         end
+                        if limits.maxReturns and rs.n > limits.maxReturns then
+                            error("too many return values", 0)
+                        end
                         top = ret_sp
                         if nres < 0 then
                             for j = 1, rs.n do
@@ -1038,6 +1080,9 @@ run_closure = function(fn, ...)
                 nret = top - (exprbase - 1)
             else
                 nret = n
+            end
+            if limits.maxReturns and nret > limits.maxReturns then
+                error("too many return values", 0)
             end
             local src = top - nret + 1
             local dret = cur.ret_sp
@@ -1079,6 +1124,13 @@ run_closure = function(fn, ...)
         elseif op == VARARG then
             local nres = C[pc + 1]
             local n = va and va.n or 0
+            local varargCount = nres < 0 and n or nres
+            if limits.maxReturns and varargCount > limits.maxReturns then
+                error("too many return values", 0)
+            end
+            if limits.maxStack and top + varargCount > limits.maxStack then
+                error("stack limit exceeded", 0)
+            end
             if nres < 0 then
                 for j = 1, n do
                     top = top + 1
@@ -1235,7 +1287,7 @@ run_closure = function(fn, ...)
     end
 end
 
-local function custom_loadstring(source, env)
+local function custom_loadstring(source, env, opts)
     if type(source) ~= "string" then
         return nil, "script must be a string"
     end
@@ -1243,6 +1295,28 @@ local function custom_loadstring(source, env)
         env = {}
     elseif type(env) ~= "table" then
         return nil, "environment must be a table"
+    end
+    if opts ~= nil and type(opts) ~= "table" then
+        return nil, "options must be a table"
+    end
+
+    local limits = {}
+    for k, v in pairs(DEFAULT_LIMITS) do
+        limits[k] = v
+    end
+    if opts then
+        for k, v in pairs(opts) do
+            if DEFAULT_LIMITS[k] ~= nil then
+                if type(v) ~= "number" or v <= 0 or v ~= v then
+                    return nil, "option '" .. tostring(k) ..
+                        "' must be a positive number"
+                end
+                limits[k] = v
+            end
+        end
+    end
+    if #source > limits.maxSourceBytes then
+        return nil, "source exceeds maxSourceBytes"
     end
 
     local function compile()
@@ -2588,6 +2662,9 @@ local function custom_loadstring(source, env)
             expect("end")
             emit(RET, 0, 0, 0)
             optimize_code(child.code, child.ncode)
+            if child.ncode > limits.maxCodeSlots then
+                error("code exceeds maxCodeSlots", 0)
+            end
 
             local proto = {
                 code = child.code,
@@ -2598,6 +2675,7 @@ local function custom_loadstring(source, env)
                 maxreg = child.maxreg,
                 env = env,
                 protos = all_protos,
+                limits = limits,
             }
             all_protos[#all_protos + 1] = proto
             local idx = #all_protos
@@ -3202,6 +3280,9 @@ local function custom_loadstring(source, env)
         end
         emit(RET, 0, 0, 0)
         optimize_code(fc.code, fc.ncode)
+        if fc.ncode > limits.maxCodeSlots then
+            error("code exceeds maxCodeSlots", 0)
+        end
 
         local proto = {
             code = fc.code,
@@ -3212,6 +3293,7 @@ local function custom_loadstring(source, env)
             maxreg = fc.maxreg,
             env = env,
             protos = all_protos,
+            limits = limits,
         }
         all_protos[#all_protos + 1] = proto
         return proto

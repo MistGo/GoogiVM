@@ -25,6 +25,7 @@ local modules = {
     "test_superinstructions",
     "test_fuzz",
     "test_stress",
+    "test_limits",
 }
 
 local grand_total = 0

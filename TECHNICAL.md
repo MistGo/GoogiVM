@@ -115,7 +115,11 @@ Table reads and writes use the host's normal `t[k]` operations. Arithmetic, comp
 
 Global reads and writes use the supplied `env` table directly, so `__index` and `__newindex` work. The default is an empty table, never `_G`.
 
-`getfenv`/`setfenv` are special-cased in `CALLD` when the host provides them. `setfenv(0, ...)` is intentionally rejected.
+`getfenv`/`setfenv` are special-cased in `CALLD` when the host provides them. `setfenv(0, ...)` is intentionally rejected. Native function environments are not exposed through the sandbox: `getfenv(nativeFn)` and `setfenv(nativeFn, ...)` fail with an error.
+
+### Budgets
+
+`custom_loadstring` accepts an optional third `options` table. Compile-time checks cover source size and bytecode slots. Runtime checks cover instruction count, interpreted call depth, value-stack index, argument count, and return-value count. All limits are enabled by default and can be individually disabled with `math.huge`.
 
 ### Errors
 
@@ -151,8 +155,8 @@ Never fuse across a jump target and never skip a live instruction.
 
 - No tail-call optimization.
 - No runtime source-line mapping.
-- No instruction, time, or memory budget.
+- No wall-clock timeout or memory quota; instruction/call-depth/stack budgets are available, but external process isolation is still recommended.
 - No bytecode serialization.
 - No Lua 5.2+ grammar.
-- Deep recursion is limited by the host stack.
+- Deep recursion is bounded by `maxCallDepth` and the VM value stack; there is no tail-call reuse.
 - Behavior of `#` on sparse tables and some metamethod edge cases is host-defined.
