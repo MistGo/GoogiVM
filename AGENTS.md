@@ -84,6 +84,7 @@ Important details:
 - Captured locals become heap cells (`GETCELL`/`SETCELL`); loop variables can get a fresh cell per iteration.
 - Calls use `CALLD`; custom-to-custom calls push explicit VM frames instead of recursing through the host.
 - Multi-return uses `MARK`, `POP`, `PEEK`, `VARARG`, and `SETLISTMULTI`.
+- On LuaJIT, base comparisons go through `compare_op`, which is `jit.off`; fused comparison opcodes are suppressed to avoid an intermittent upstream miscompile.
 
 ## Invariants
 

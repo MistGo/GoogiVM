@@ -100,6 +100,28 @@ local FOP = {
 
 local run_closure
 
+-- LuaJIT 2.1 can intermittently miscompile the base comparison path inside
+-- the large VM function. Keeping comparisons in a tiny, non-JIT function is
+-- cheap compared to making the entire interpreter non-JIT.
+local function compare_op(op, a, b)
+    if op == 23 then
+        return a == b
+    elseif op == 24 then
+        return a ~= b
+    elseif op == 25 then
+        return a < b
+    elseif op == 26 then
+        return a <= b
+    elseif op == 27 then
+        return a > b
+    else
+        return a >= b
+    end
+end
+if type(jit) == "table" and jit.off then
+    jit.off(compare_op)
+end
+
 local function make_closure(proto, upvals, fenv)
     local function closure(...)
         return run_closure(closure, ...)
@@ -763,7 +785,7 @@ run_closure = function(fn, ...)
             local a = S[top - 1]
             S[top] = nil
             top = top - 1
-            S[top] = (a == b)
+            S[top] = compare_op(op, a, b)
             pc = pc + 4
 
         elseif op == NE then
@@ -771,7 +793,7 @@ run_closure = function(fn, ...)
             local a = S[top - 1]
             S[top] = nil
             top = top - 1
-            S[top] = (a ~= b)
+            S[top] = compare_op(op, a, b)
             pc = pc + 4
 
         elseif op == LT then
@@ -779,7 +801,7 @@ run_closure = function(fn, ...)
             local a = S[top - 1]
             S[top] = nil
             top = top - 1
-            S[top] = (a < b)
+            S[top] = compare_op(op, a, b)
             pc = pc + 4
 
         elseif op == LE then
@@ -787,7 +809,7 @@ run_closure = function(fn, ...)
             local a = S[top - 1]
             S[top] = nil
             top = top - 1
-            S[top] = (a <= b)
+            S[top] = compare_op(op, a, b)
             pc = pc + 4
 
         elseif op == GT then
@@ -795,7 +817,7 @@ run_closure = function(fn, ...)
             local a = S[top - 1]
             S[top] = nil
             top = top - 1
-            S[top] = (a > b)
+            S[top] = compare_op(op, a, b)
             pc = pc + 4
 
         elseif op == GE then
@@ -803,7 +825,7 @@ run_closure = function(fn, ...)
             local a = S[top - 1]
             S[top] = nil
             top = top - 1
-            S[top] = (a >= b)
+            S[top] = compare_op(op, a, b)
             pc = pc + 4
 
         elseif op == TESTF then
@@ -1286,6 +1308,12 @@ run_closure = function(fn, ...)
         end
     end
 end
+
+-- LuaJIT 2.1 has an intermittent miscompile in the fused comparison path
+-- (observed as e.g. "0.5 > -1" returning false after a large fuzz run).
+-- Keep comparisons on the base opcodes when a LuaJIT runtime is present;
+-- plain Lua hosts can still use the fused forms.
+local has_jit = type(jit) == "table"
 
 local function custom_loadstring(source, env, opts)
     if type(source) ~= "string" then
@@ -1999,6 +2027,15 @@ local function custom_loadstring(source, env, opts)
                 [LT] = FOP.JMPF_LT_K, [LE] = FOP.JMPF_LE_K,
                 [GT] = FOP.JMPF_GT_K, [GE] = FOP.JMPF_GE_K,
             }
+            if has_jit then
+                -- See the LuaJIT note near custom_loadstring.
+                for _, op in ipairs({ EQ, NE, LT, LE, GT, GE }) do
+                    rr[op] = nil
+                    rk[op] = nil
+                    kop[op] = nil
+                    jmpk[op] = nil
+                end
+            end
 
             local function try_stmt(pos)
                 -- t[K] = V / t[K] = constant

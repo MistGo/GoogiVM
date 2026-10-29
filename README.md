@@ -147,6 +147,8 @@ The `tests/` directory is only for development; it is not needed to use the libr
 
 On the project microbenchmarks, this interpreter was about **1.6x faster than FiOne** overall after the peephole/superinstruction work. It is still much slower than native LuaJIT, which is a different execution model. These are microbenchmarks, not a representative game workload.
 
+**LuaJIT 2.1 note:** the base comparison path runs through a small non-JIT helper, and fused comparison opcodes are disabled when a `jit` table is present. This avoids an intermittent LuaJIT miscompile observed under long differential-fuzz runs. Arithmetic and loop execution remain JIT-compiled.
+
 ## Files
 
 ```text

@@ -121,6 +121,10 @@ Global reads and writes use the supplied `env` table directly, so `__index` and 
 
 `custom_loadstring` accepts an optional third `options` table. Compile-time checks cover source size and bytecode slots. Runtime checks cover instruction count, interpreted call depth, value-stack index, argument count, and return-value count. All limits are enabled by default and can be individually disabled with `math.huge`.
 
+### LuaJIT compatibility
+
+LuaJIT 2.1 can intermittently miscompile the base comparison path inside the large VM function under long fuzz workloads. Base comparisons are therefore routed through a small function that is explicitly `jit.off` when the `jit` API is present, and fused comparison opcodes are disabled on such hosts. Arithmetic and loops remain JIT-compiled.
+
 ### Errors
 
 Syntax errors are caught by `pcall(compile)` and returned as `nil, message`. Runtime errors are not caught: they propagate out of the chunk and preserve the original error object. Runtime errors do not have a script-level line map.
