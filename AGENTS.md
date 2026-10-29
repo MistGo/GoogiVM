@@ -15,7 +15,7 @@ local chunk, err = custom_loadstring(source, env, options)
 
 - `source` must be a string.
 - `env` is optional; `nil` means a fresh empty table, **not** `_G`.
-- `options` is optional and may contain execution/compile limits.
+- `options` is optional and may contain execution/compile limits and `sourceName`.
 - Success returns a callable function.
 - Compile failure returns `nil, error_string`.
 - Runtime string errors propagate with `sourceName:line` and an interpreted trace; non-string error objects are preserved.
