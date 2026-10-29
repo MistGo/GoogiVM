@@ -78,7 +78,7 @@ source
 Important details:
 
 - Instructions are stored as four numbers: `{OPCODE, A, B, C}`.
-- Normal opcodes are 1–51; fused opcodes are 52-119.
+- Normal opcodes are 1–51; fused opcodes are 52-146.
 - Fused instructions skip dead slots; the program counter can advance by 8, 12, 16, or 24 numbers.
 - The optimizer does not shift code. It overwrites the first slot and marks the rest dead.
 - Captured locals become heap cells (`GETCELL`/`SETCELL`); loop variables can get a fresh cell per iteration.

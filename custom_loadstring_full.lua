@@ -37,6 +37,11 @@ local select = select
 local setmetatable = setmetatable
 local getfenv = getfenv
 local setfenv = setfenv
+local getmetatable = getmetatable
+local next = next
+local ipairs = ipairs
+local rawget = rawget
+local ipairs_iter = ipairs and select(1, ipairs({}))
 local unpack = unpack or table.unpack
 
 local function pack(...)
@@ -102,6 +107,29 @@ local FOP = {
     FORLOOP_SETINDEX_RR = 115, FORLOOP_SETINDEX_RK = 116,
     FORLOOP_SUB_RR = 117, FORLOOP_SUB_RK = 118,
     JMPF_MOD_EQ_K = 119,
+
+    JMPF_EQ_RR = 120, JMPF_EQ_RK = 121,
+    JMPF_NE_RR = 122, JMPF_NE_RK = 123,
+    JMPF_LT_RR = 124, JMPF_LT_RK = 125,
+    JMPF_LE_RR = 126, JMPF_LE_RK = 127,
+    JMPF_GT_RR = 128, JMPF_GT_RK = 129,
+    JMPF_GE_RR = 130, JMPF_GE_RK = 131,
+
+    TFOR_2 = 132,
+    TFOR_1 = 133,
+    NEWTABLE_LOCAL = 134,
+    SETLIST_R = 135,
+    SETLIST_K = 136,
+    SETLIST_ADD_RK = 137,
+    NEWTABLE_FIELD_R = 138,
+    NEWTABLE_FIELD_K = 139,
+    NEWTABLE_SETINDEX_R = 140,
+    NEWTABLE_LIST3_ADD_RK = 141,
+    JMPF_MOD_RR_EQ_K = 142,
+    ADD_ASSIGN_BINOP_RR = 143,
+    SETLOCAL_BOOL = 144,
+    FORLOOP_MOD_RR_EQ_K = 145,
+    FORLOOP_NEWTABLE_SETINDEX_R = 146,
 }
 
 local run_closure
@@ -164,7 +192,11 @@ local function format_runtime_error(err, trace)
 end
 
 local function make_closure(proto, upvals, fenv, set_native_env)
+    local info
     local function closure(...)
+        if info.fast then
+            return run_closure(closure, nil, ...)
+        end
         local trace = {}
         local result = pack(pcall(run_closure, closure, trace, ...))
         if result[1] then
@@ -179,10 +211,11 @@ local function make_closure(proto, upvals, fenv, set_native_env)
     if set_native_env and setfenv then
         native_env = pcall(setfenv, closure, env)
     end
-    closure_info[closure] = {
+    info = {
         p = proto, u = upvals, env = env, fenv = native_env,
-        limits = proto.limits,
+        limits = proto.limits, fast = not set_native_env,
     }
+    closure_info[closure] = info
     return closure
 end
 
@@ -249,6 +282,23 @@ run_closure = function(fn, trace, ...)
     local F_FORLOOP_SETINDEX_RR, F_FORLOOP_SETINDEX_RK = 115, 116
     local F_FORLOOP_SUB_RR, F_FORLOOP_SUB_RK = 117, 118
     local F_JMPF_MOD_EQ_K = 119
+    local F_JMPF_EQ_RR, F_JMPF_EQ_RK = 120, 121
+    local F_JMPF_NE_RR, F_JMPF_NE_RK = 122, 123
+    local F_JMPF_LT_RR, F_JMPF_LT_RK = 124, 125
+    local F_JMPF_LE_RR, F_JMPF_LE_RK = 126, 127
+    local F_JMPF_GT_RR, F_JMPF_GT_RK = 128, 129
+    local F_JMPF_GE_RR, F_JMPF_GE_RK = 130, 131
+    local F_TFOR_2, F_TFOR_1 = 132, 133
+    local F_NEWTABLE_LOCAL = 134
+    local F_SETLIST_R, F_SETLIST_K, F_SETLIST_ADD_RK = 135, 136, 137
+    local F_NEWTABLE_FIELD_R, F_NEWTABLE_FIELD_K = 138, 139
+    local F_NEWTABLE_SETINDEX_R = 140
+    local F_NEWTABLE_LIST3_ADD_RK = 141
+    local F_JMPF_MOD_RR_EQ_K = 142
+    local F_ADD_ASSIGN_BINOP_RR = 143
+    local F_SETLOCAL_BOOL = 144
+    local F_FORLOOP_MOD_RR_EQ_K = 145
+    local F_FORLOOP_NEWTABLE_SETINDEX_R = 146
 
     local info = closure_info[fn]
     local p = info.p
@@ -314,6 +364,7 @@ run_closure = function(fn, trace, ...)
     local U = info.u
     local e = cenv
     local pc = 1
+    local has_jit = type(jit) == "table"
 
     while true do
         if instructionBudget then
@@ -339,6 +390,136 @@ run_closure = function(fn, trace, ...)
                     pc = pc + 24
                 else
                     pc = C[pc + 14]
+                end
+
+            elseif op == F_JMPF_MOD_RR_EQ_K then
+                local v = S[base + C[pc + 1] - 1] % S[base + C[pc + 2] - 1]
+                if v == K[C[pc + 3]] then
+                    pc = pc + 24
+                else
+                    pc = C[pc + 14]
+                end
+
+            elseif op == F_FORLOOP_MOD_RR_EQ_K then
+                local r = base + C[pc + 1] - 1
+                local step = S[r + 2]
+                local limit = S[r + 1]
+                local idx = S[r] + step
+                if (step > 0 and idx <= limit) or
+                   (step < 0 and idx >= limit) then
+                    S[r] = idx
+                    S[base + C[pc + 2] - 1] = idx
+                    local body = C[pc + 3]
+                    trace.pc = body + 12
+                    local v = S[base + C[body + 13] - 1] % S[base + C[body + 14] - 1]
+                    if v == K[C[body + 15]] then
+                        pc = body + 36
+                    else
+                        local nxt = C[body + 26]
+                        if nxt ~= pc then pc = nxt end
+                    end
+                else
+                    pc = pc + 4
+                end
+
+            elseif op == F_FORLOOP_NEWTABLE_SETINDEX_R then
+                local r = base + C[pc + 1] - 1
+                local step = S[r + 2]
+                local limit = S[r + 1]
+                local idx = S[r] + step
+                if (step > 0 and idx <= limit) or
+                   (step < 0 and idx >= limit) then
+                    S[r] = idx
+                    S[base + C[pc + 2] - 1] = idx
+                    local body = C[pc + 3]
+                    trace.pc = body + 12
+                    local t = S[base + C[body + 13] - 1]
+                    local k = S[base + C[body + 14] - 1]
+                    t[k] = { [K[C[body + 37]]] = S[base + C[body + 15] - 1] }
+                    local nxt = body + 52
+                    if nxt ~= pc then pc = nxt end
+                else
+                    pc = pc + 4
+                end
+
+            elseif op == F_SETLOCAL_BOOL then
+                S[base + C[pc + 1] - 1] = (C[pc + 2] == 1)
+                pc = pc + 8
+
+            elseif op == F_ADD_ASSIGN_BINOP_RR then
+                local dest = base + C[pc + 1] - 1
+                local a = S[base + C[pc + 2] - 1]
+                local b = S[base + C[pc + 3] - 1]
+                local bop = C[pc + 12]
+                if bop == ADD then
+                    if type(a) == "number" and type(b) == "number" then
+                        S[dest] = S[dest] + (a + b)
+                        pc = pc + 24
+                    else
+                        local mt = (type(a) == "table" and getmetatable(a)) or
+                                   (type(b) == "table" and getmetatable(b))
+                        local mm = type(mt) == "table" and rawget(mt, "__add")
+                        local mci = mm and closure_info[mm]
+                        if mci and not mci.p.isvararg then
+                            local cp = mci.p
+                            if limits.maxCallDepth and fi >= limits.maxCallDepth then
+                                error("call depth limit exceeded", 0)
+                            end
+                            top = top + 1
+                            S[top] = S[dest]
+                            local fpos = top + 1
+                            S[fpos] = a
+                            S[fpos + 1] = b
+                            local cmax = cp.maxreg
+                            for j = 3, cmax do
+                                S[fpos + j - 1] = nil
+                            end
+                            cur.pc = pc + 16
+                            frames[fi] = cur
+                            local nfree = free_frame_count
+                            local frame
+                            if nfree > 0 then
+                                frame = free_frames[nfree]
+                                free_frames[nfree] = nil
+                                free_frame_count = nfree - 1
+                            else
+                                frame = {}
+                            end
+                            frame.p = cp
+                            frame.ups = mci.u
+                            frame.base = fpos
+                            frame.pc = 1
+                            frame.ret_sp = top
+                            frame.wanted = 1
+                            frame.va = nil
+                            frame.env = mci.env
+                            frame.cl = mm
+                            cur = frame
+                            fi = fi + 1
+                            frames[fi] = cur
+                            trace.cur = cur
+                            trace.fi = fi
+                            p = cp
+                            C = cp.code
+                            K = cp.consts
+                            U = mci.u
+                            e = mci.env
+                            base = fpos
+                            maxreg = cmax
+                            va = nil
+                            pc = 1
+                            top = fpos + cmax - 1
+                        else
+                            S[dest] = S[dest] + (a + b)
+                            pc = pc + 24
+                        end
+                    end
+                elseif bop == SUB then
+                    S[dest] = S[dest] + (a - b)
+                    pc = pc + 24
+                else
+                    S[dest] = S[dest] + (a * b)
+                    pc = pc + 24
                 end
 
             elseif op == F_JMPF_EQ_K then
@@ -518,6 +699,174 @@ run_closure = function(fn, trace, ...)
                     pc = pc + 4
                 end
 
+            elseif op == F_TFOR_2 then
+                local r = base + C[pc + 1] - 1
+                local f = S[r]
+                if f == ipairs_iter then
+                    local idx = S[r + 2] + 1
+                    local val = rawget(S[r + 1], idx)
+                    if val ~= nil then
+                        S[r + 2] = idx
+                        if C[pc + 2] == 0 then
+                            S[r + 3] = idx
+                            S[r + 4] = val
+                        else
+                            S[r + 3] = C[pc + 36] == CELL and { v = idx } or idx
+                            S[r + 4] = C[pc + 28] == CELL and { v = val } or val
+                        end
+                        pc = pc + 56
+                    else
+                        pc = C[pc + 53]
+                    end
+                elseif f == next then
+                    local k, val = next(S[r + 1], S[r + 2])
+                    if k ~= nil then
+                        S[r + 2] = k
+                        if C[pc + 2] == 0 then
+                            S[r + 3] = k
+                            S[r + 4] = val
+                        else
+                            S[r + 3] = C[pc + 36] == CELL and { v = k } or k
+                            S[r + 4] = C[pc + 28] == CELL and { v = val } or val
+                        end
+                        pc = pc + 56
+                    else
+                        pc = C[pc + 53]
+                    end
+                elseif not closure_info[f] and f ~= getfenv and f ~= setfenv then
+                    local k, val = f(S[r + 1], S[r + 2])
+                    if k ~= nil then
+                        S[r + 2] = k
+                        if C[pc + 2] == 0 then
+                            S[r + 3] = k
+                            S[r + 4] = val
+                        else
+                            S[r + 3] = C[pc + 36] == CELL and { v = k } or k
+                            S[r + 4] = C[pc + 28] == CELL and { v = val } or val
+                        end
+                        pc = pc + 56
+                    else
+                        pc = C[pc + 53]
+                    end
+                else
+                    top = top + 1
+                    S[top] = f
+                    pc = pc + 4
+                end
+
+            elseif op == F_TFOR_1 then
+                local r = base + C[pc + 1] - 1
+                local f = S[r]
+                if f == ipairs_iter then
+                    local idx = S[r + 2] + 1
+                    local val = rawget(S[r + 1], idx)
+                    if val ~= nil then
+                        S[r + 2] = idx
+                        if C[pc + 2] == 0 then
+                            S[r + 3] = idx
+                        else
+                            S[r + 3] = { v = idx }
+                        end
+                        pc = pc + 48
+                    else
+                        pc = C[pc + 45]
+                    end
+                elseif f == next then
+                    local k = next(S[r + 1], S[r + 2])
+                    if k ~= nil then
+                        S[r + 2] = k
+                        if C[pc + 2] == 0 then
+                            S[r + 3] = k
+                        else
+                            S[r + 3] = { v = k }
+                        end
+                        pc = pc + 48
+                    else
+                        pc = C[pc + 45]
+                    end
+                elseif not closure_info[f] and f ~= getfenv and f ~= setfenv then
+                    local k = f(S[r + 1], S[r + 2])
+                    if k ~= nil then
+                        S[r + 2] = k
+                        if C[pc + 2] == 0 then
+                            S[r + 3] = k
+                        else
+                            S[r + 3] = { v = k }
+                        end
+                        pc = pc + 48
+                    else
+                        pc = C[pc + 45]
+                    end
+                else
+                    top = top + 1
+                    S[top] = f
+                    pc = pc + 4
+                end
+
+            elseif op == F_NEWTABLE_LOCAL then
+                S[base + C[pc + 1] - 1] = {}
+                pc = pc + 8
+
+            elseif op == F_SETLIST_R then
+                local t = S[base + C[pc + 1] - 1]
+                t[C[pc + 2]] = S[base + C[pc + 3] - 1]
+                pc = pc + 12
+
+            elseif op == F_SETLIST_K then
+                local t = S[base + C[pc + 1] - 1]
+                t[C[pc + 2]] = K[C[pc + 3]]
+                pc = pc + 12
+
+            elseif op == F_SETLIST_ADD_RK then
+                local t = S[base + C[pc + 1] - 1]
+                t[C[pc + 2]] = S[base + C[pc + 3] - 1] + K[C[pc + 9]]
+                pc = pc + 20
+
+            elseif op == F_NEWTABLE_FIELD_R then
+                local t = { [K[C[pc + 1]]] = S[base + C[pc + 2] - 1] }
+                if C[pc + 3] > 0 then
+                    S[base + C[pc + 3] - 1] = t
+                    pc = pc + 24
+                else
+                    top = top + 1
+                    S[top] = t
+                    pc = pc + 20
+                end
+
+            elseif op == F_NEWTABLE_FIELD_K then
+                local t = { [K[C[pc + 1]]] = K[C[pc + 2]] }
+                if C[pc + 3] > 0 then
+                    S[base + C[pc + 3] - 1] = t
+                    pc = pc + 24
+                else
+                    top = top + 1
+                    S[top] = t
+                    pc = pc + 20
+                end
+
+            elseif op == F_NEWTABLE_SETINDEX_R then
+                local t = S[base + C[pc + 1] - 1]
+                local k = S[base + C[pc + 2] - 1]
+                t[k] = { [K[C[pc + 25]]] = S[base + C[pc + 3] - 1] }
+                pc = pc + 40
+
+            elseif op == F_NEWTABLE_LIST3_ADD_RK then
+                local v = S[base + C[pc + 2] - 1]
+                local t = {
+                    v,
+                    v + K[C[pc + 29]],
+                    v + K[C[pc + 49]],
+                }
+                local c = C[pc + 3]
+                if c > 0 then
+                    local sreg = base + c - 1
+                    S[sreg] = S[sreg] + t[K[C[pc + 77]]]
+                    pc = pc + 96
+                else
+                    S[base + C[pc + 1] - 1] = t
+                    pc = pc + 72
+                end
+
             elseif op == F_ADD_ASSIGN_RR then
                 local a = base + C[pc + 1] - 1
                 local b = base + C[pc + 2] - 1
@@ -557,6 +906,138 @@ run_closure = function(fn, trace, ...)
                 local a = base + C[pc + 1] - 1
                 S[a] = S[a] * K[C[pc + 2]]
                 pc = pc + 16
+
+            elseif op == F_JMPF_EQ_RR then
+                if not (S[base + C[pc + 1] - 1] == S[base + C[pc + 2] - 1]) then
+                    pc = C[pc + 3]
+                else
+                    pc = pc + 16
+                end
+
+            elseif op == F_JMPF_EQ_RK then
+                if not (S[base + C[pc + 1] - 1] == K[C[pc + 2]]) then
+                    pc = C[pc + 3]
+                else
+                    pc = pc + 16
+                end
+
+            elseif op == F_JMPF_NE_RR then
+                if not (S[base + C[pc + 1] - 1] ~= S[base + C[pc + 2] - 1]) then
+                    pc = C[pc + 3]
+                else
+                    pc = pc + 16
+                end
+
+            elseif op == F_JMPF_NE_RK then
+                if not (S[base + C[pc + 1] - 1] ~= K[C[pc + 2]]) then
+                    pc = C[pc + 3]
+                else
+                    pc = pc + 16
+                end
+
+            elseif op == F_JMPF_LT_RR then
+                if has_jit then
+                    if not compare_op(25, S[base + C[pc + 1] - 1], S[base + C[pc + 2] - 1]) then
+                        pc = C[pc + 3]
+                    else
+                        pc = pc + 16
+                    end
+                elseif not (S[base + C[pc + 1] - 1] < S[base + C[pc + 2] - 1]) then
+                    pc = C[pc + 3]
+                else
+                    pc = pc + 16
+                end
+
+            elseif op == F_JMPF_LT_RK then
+                if has_jit then
+                    if not compare_op(25, S[base + C[pc + 1] - 1], K[C[pc + 2]]) then
+                        pc = C[pc + 3]
+                    else
+                        pc = pc + 16
+                    end
+                elseif not (S[base + C[pc + 1] - 1] < K[C[pc + 2]]) then
+                    pc = C[pc + 3]
+                else
+                    pc = pc + 16
+                end
+
+            elseif op == F_JMPF_LE_RR then
+                if has_jit then
+                    if not compare_op(26, S[base + C[pc + 1] - 1], S[base + C[pc + 2] - 1]) then
+                        pc = C[pc + 3]
+                    else
+                        pc = pc + 16
+                    end
+                elseif not (S[base + C[pc + 1] - 1] <= S[base + C[pc + 2] - 1]) then
+                    pc = C[pc + 3]
+                else
+                    pc = pc + 16
+                end
+
+            elseif op == F_JMPF_LE_RK then
+                if has_jit then
+                    if not compare_op(26, S[base + C[pc + 1] - 1], K[C[pc + 2]]) then
+                        pc = C[pc + 3]
+                    else
+                        pc = pc + 16
+                    end
+                elseif not (S[base + C[pc + 1] - 1] <= K[C[pc + 2]]) then
+                    pc = C[pc + 3]
+                else
+                    pc = pc + 16
+                end
+
+            elseif op == F_JMPF_GT_RR then
+                if has_jit then
+                    if not compare_op(27, S[base + C[pc + 1] - 1], S[base + C[pc + 2] - 1]) then
+                        pc = C[pc + 3]
+                    else
+                        pc = pc + 16
+                    end
+                elseif not (S[base + C[pc + 1] - 1] > S[base + C[pc + 2] - 1]) then
+                    pc = C[pc + 3]
+                else
+                    pc = pc + 16
+                end
+
+            elseif op == F_JMPF_GT_RK then
+                if has_jit then
+                    if not compare_op(27, S[base + C[pc + 1] - 1], K[C[pc + 2]]) then
+                        pc = C[pc + 3]
+                    else
+                        pc = pc + 16
+                    end
+                elseif not (S[base + C[pc + 1] - 1] > K[C[pc + 2]]) then
+                    pc = C[pc + 3]
+                else
+                    pc = pc + 16
+                end
+
+            elseif op == F_JMPF_GE_RR then
+                if has_jit then
+                    if not compare_op(28, S[base + C[pc + 1] - 1], S[base + C[pc + 2] - 1]) then
+                        pc = C[pc + 3]
+                    else
+                        pc = pc + 16
+                    end
+                elseif not (S[base + C[pc + 1] - 1] >= S[base + C[pc + 2] - 1]) then
+                    pc = C[pc + 3]
+                else
+                    pc = pc + 16
+                end
+
+            elseif op == F_JMPF_GE_RK then
+                if has_jit then
+                    if not compare_op(28, S[base + C[pc + 1] - 1], K[C[pc + 2]]) then
+                        pc = C[pc + 3]
+                    else
+                        pc = pc + 16
+                    end
+                elseif not (S[base + C[pc + 1] - 1] >= K[C[pc + 2]]) then
+                    pc = C[pc + 3]
+                else
+                    pc = pc + 16
+                end
 
             elseif op == F_MOVLOCAL_NOP then
                 S[base + C[pc + 1] - 1] = S[base + C[pc + 2] - 1]
@@ -2320,6 +2801,16 @@ local function custom_loadstring(source, env, opts)
                 [LT] = FOP.JMPF_LT_K, [LE] = FOP.JMPF_LE_K,
                 [GT] = FOP.JMPF_GT_K, [GE] = FOP.JMPF_GE_K,
             }
+            local jmprr = {
+                [EQ] = FOP.JMPF_EQ_RR, [NE] = FOP.JMPF_NE_RR,
+                [LT] = FOP.JMPF_LT_RR, [LE] = FOP.JMPF_LE_RR,
+                [GT] = FOP.JMPF_GT_RR, [GE] = FOP.JMPF_GE_RR,
+            }
+            local jmprk = {
+                [EQ] = FOP.JMPF_EQ_RK, [NE] = FOP.JMPF_NE_RK,
+                [LT] = FOP.JMPF_LT_RK, [LE] = FOP.JMPF_LE_RK,
+                [GT] = FOP.JMPF_GT_RK, [GE] = FOP.JMPF_GE_RK,
+            }
             if has_jit then
                 -- See the LuaJIT note near custom_loadstring. Equality
                 -- fusions are safe; only ordering comparisons have the
@@ -2373,6 +2864,21 @@ local function custom_loadstring(source, env, opts)
                             put(pos, FOP.SETFIELD_RK, t, key, v, 4)
                         end
                         return pos + 16
+                    end
+                end
+
+                -- target = target + (a op b)
+                if pos + 20 <= n and co[pos] == GETLOCAL and
+                   co[pos + 4] == GETLOCAL and co[pos + 8] == GETLOCAL and
+                   (co[pos + 12] == ADD or co[pos + 12] == SUB or co[pos + 12] == MUL) and
+                   co[pos + 16] == ADD and co[pos + 20] == SETLOCAL and
+                   co[pos + 21] == co[pos + 1] and can(pos, 6) then
+                    local dest = co[pos + 1]
+                    local a = co[pos + 5]
+                    local b = co[pos + 9]
+                    if dest ~= a and dest ~= b then
+                        put(pos, FOP.ADD_ASSIGN_BINOP_RR, dest, a, b, 6)
+                        return pos + 24
                     end
                 end
 
@@ -2443,6 +2949,13 @@ local function custom_loadstring(source, env, opts)
                     return pos + 8
                 end
 
+                -- target = boolean
+                if co[pos] == LOADBOOL and co[pos + 4] == SETLOCAL and
+                   can(pos, 2) then
+                    put(pos, FOP.SETLOCAL_BOOL, co[pos + 5], co[pos + 1], 0, 2)
+                    return pos + 8
+                end
+
                 -- loop variable: GETLOCAL; SETLOCAL raw; CELL/NOP
                 if co[pos] == GETLOCAL and co[pos + 4] == SETLOCAL and
                    (co[pos + 8] == NOP or co[pos + 8] == CELL) and
@@ -2474,6 +2987,208 @@ local function custom_loadstring(source, env, opts)
             end
 
             local function try_expr(pos)
+                -- generic for (2 variables): GETLOCAL freg .. JMPNIL_LOCAL creg
+                if pos + 52 <= n and co[pos] == GETLOCAL and
+                   co[pos + 4] == MARK and co[pos + 8] == GETLOCAL and
+                   co[pos + 12] == GETLOCAL and co[pos + 16] == CALLD and
+                   co[pos + 18] == 2 and co[pos + 20] == PEEK and
+                   co[pos + 24] == SETLOCAL and
+                   (co[pos + 28] == NOP or co[pos + 28] == CELL) and
+                   co[pos + 32] == SETLOCAL and
+                   (co[pos + 36] == NOP or co[pos + 36] == CELL) and
+                   co[pos + 40] == FOP.MOVLOCAL and
+                   co[pos + 48] == GETLOCAL and co[pos + 52] == JMPNIL and
+                   can(pos, 11) and not targets[pos + 48] and not targets[pos + 52] then
+                    local freg = co[pos + 1]
+                    if co[pos + 9] == freg + 1 and co[pos + 13] == freg + 2 and
+                       co[pos + 33] == freg + 3 and co[pos + 25] == freg + 4 and
+                       co[pos + 41] == freg + 2 and co[pos + 49] == freg + 2 then
+                        put(pos + 48, FOP.JMPNIL_LOCAL, freg + 2, co[pos + 53], 0, 2)
+                        co[pos] = FOP.TFOR_2
+                        co[pos + 1] = freg
+                        co[pos + 2] = (co[pos + 28] == CELL or co[pos + 36] == CELL) and 1 or 0
+                        co[pos + 3] = 0
+                        return pos + 56
+                    end
+                end
+
+                -- generic for (1 variable): GETLOCAL freg .. JMPNIL_LOCAL creg
+                if pos + 44 <= n and co[pos] == GETLOCAL and
+                   co[pos + 4] == MARK and co[pos + 8] == GETLOCAL and
+                   co[pos + 12] == GETLOCAL and co[pos + 16] == CALLD and
+                   co[pos + 18] == 1 and co[pos + 20] == PEEK and
+                   co[pos + 24] == SETLOCAL and
+                   (co[pos + 28] == NOP or co[pos + 28] == CELL) and
+                   co[pos + 32] == FOP.MOVLOCAL and
+                   co[pos + 40] == GETLOCAL and co[pos + 44] == JMPNIL and
+                   can(pos, 9) and not targets[pos + 40] and not targets[pos + 44] then
+                    local freg = co[pos + 1]
+                    if co[pos + 9] == freg + 1 and co[pos + 13] == freg + 2 and
+                       co[pos + 25] == freg + 3 and
+                       co[pos + 33] == freg + 2 and co[pos + 41] == freg + 2 then
+                        put(pos + 40, FOP.JMPNIL_LOCAL, freg + 2, co[pos + 45], 0, 2)
+                        co[pos] = FOP.TFOR_1
+                        co[pos + 1] = freg
+                        co[pos + 2] = (co[pos + 28] == CELL) and 1 or 0
+                        co[pos + 3] = 0
+                        return pos + 48
+                    end
+                end
+
+                -- local/local and local/constant comparison directly followed by JMPF
+                if co[pos] == GETLOCAL and
+                   (co[pos + 4] == GETLOCAL or co[pos + 4] == LOADK) and
+                   jmprr[co[pos + 8]] and co[pos + 12] == JMPF and
+                   can(pos, 4) then
+                    if co[pos + 4] == GETLOCAL then
+                        put(pos, jmprr[co[pos + 8]], co[pos + 1], co[pos + 5], co[pos + 13], 4)
+                    else
+                        put(pos, jmprk[co[pos + 8]], co[pos + 1], co[pos + 5], co[pos + 13], 4)
+                    end
+                    return pos + 16
+                end
+
+                -- t[k] = { field = local }
+                if pos + 36 <= n and co[pos] == GETLOCAL and
+                   co[pos + 4] == FOP.MOVLOCAL and co[pos + 12] == SETLOCAL and
+                   co[pos + 16] == NEWTABLE and co[pos + 20] == SETLOCAL and
+                   (co[pos + 24] == GETLOCAL or co[pos + 24] == LOADK) and
+                   co[pos + 28] == SETFIELD and co[pos + 29] == co[pos + 21] and
+                   co[pos + 32] == GETLOCAL and co[pos + 33] == co[pos + 21] and
+                   co[pos + 36] == SETINDEX and
+                   not targets[pos + 4] and not targets[pos + 12] and
+                   not targets[pos + 16] and not targets[pos + 20] and
+                   not targets[pos + 24] and not targets[pos + 28] and
+                   not targets[pos + 32] and not targets[pos + 36] then
+                    local t = co[pos + 1]
+                    local keytemp = co[pos + 5]
+                    local k = co[pos + 6]
+                    local basetemp = co[pos + 13]
+                    local treg = co[pos + 21]
+                    local v = co[pos + 25]
+                    local fkey = co[pos + 30]
+                    if co[pos + 24] == GETLOCAL and
+                       co[pos + 37] == basetemp and co[pos + 38] == keytemp and
+                       t ~= keytemp and t ~= basetemp and
+                       k ~= keytemp and k ~= basetemp and
+                       v ~= keytemp and v ~= basetemp and v ~= treg then
+                        co[pos + 25] = fkey
+                        put(pos, FOP.NEWTABLE_SETINDEX_R, t, k, v, 10)
+                        return pos + 40
+                    end
+                end
+
+                -- single-field table constructor: { field = local/const }
+                if pos + 16 <= n and co[pos] == NEWTABLE and
+                   co[pos + 4] == SETLOCAL and
+                   (co[pos + 8] == GETLOCAL or co[pos + 8] == LOADK) and
+                   co[pos + 12] == SETFIELD and co[pos + 13] == co[pos + 5] and
+                   not targets[pos + 4] and not targets[pos + 8] and
+                   not targets[pos + 12] and not targets[pos + 16] then
+                    local treg = co[pos + 5]
+                    local v = co[pos + 9]
+                    local k = co[pos + 14]
+                    if co[pos + 8] ~= GETLOCAL or v ~= treg then
+                        local op = co[pos + 8] == GETLOCAL and FOP.NEWTABLE_FIELD_R or FOP.NEWTABLE_FIELD_K
+                        if co[pos + 16] == FOP.MOVLOCAL and co[pos + 18] == treg and
+                           pos + 20 <= n and not targets[pos + 20] then
+                            put(pos, op, k, v, co[pos + 17], 6)
+                            return pos + 24
+                        elseif co[pos + 16] == GETLOCAL and co[pos + 17] == treg then
+                            put(pos, op, k, v, 0, 5)
+                            return pos + 20
+                        end
+                    end
+                end
+
+                -- table allocation directly into local register
+                if pos + 68 <= n and co[pos] == NEWTABLE and
+                   co[pos + 4] == SETLOCAL and
+                   co[pos + 8] == MARK and co[pos + 12] == GETLOCAL and
+                   co[pos + 16] == SETLIST and co[pos + 18] == 1 and
+                   co[pos + 20] == MARK and co[pos + 24] == GETLOCAL and
+                   co[pos + 28] == LOADK and co[pos + 32] == ADD and
+                   co[pos + 36] == SETLIST and co[pos + 38] == 2 and
+                   co[pos + 40] == MARK and co[pos + 44] == GETLOCAL and
+                   co[pos + 48] == LOADK and co[pos + 52] == ADD and
+                   co[pos + 56] == SETLIST and co[pos + 58] == 3 and
+                   co[pos + 60] == FOP.MOVLOCAL_NOP and
+                   co[pos + 62] == co[pos + 5] and
+                   not targets[pos + 4] and not targets[pos + 8] and
+                   not targets[pos + 12] and not targets[pos + 16] and
+                   not targets[pos + 20] and not targets[pos + 24] and
+                   not targets[pos + 28] and not targets[pos + 32] and
+                   not targets[pos + 36] and not targets[pos + 40] and
+                   not targets[pos + 44] and not targets[pos + 48] and
+                   not targets[pos + 52] and not targets[pos + 56] and
+                   not targets[pos + 60] then
+                    local treg = co[pos + 5]
+                    local mreg = co[pos + 9]
+                    local v = co[pos + 13]
+                    local dest = co[pos + 61]
+                    if co[pos + 17] == treg and co[pos + 37] == treg and
+                       co[pos + 57] == treg and co[pos + 25] == v and
+                       co[pos + 45] == v and v ~= treg and v ~= mreg then
+                        if pos + 92 <= n and co[pos + 72] == GETLOCAL and
+                           co[pos + 76] == GETLOCAL and co[pos + 77] == dest and
+                           co[pos + 80] == LOADK and co[pos + 84] == INDEX and
+                           co[pos + 88] == ADD and co[pos + 92] == SETLOCAL and
+                           co[pos + 93] == co[pos + 73] and
+                           co[pos + 96] == FOP.FORLOOP_MOV and
+                           co[pos + 73] ~= dest and
+                           not targets[pos + 72] and not targets[pos + 76] and
+                           not targets[pos + 80] and not targets[pos + 84] and
+                           not targets[pos + 88] and not targets[pos + 92] then
+                            co[pos + 77] = co[pos + 81]
+                            put(pos, FOP.NEWTABLE_LIST3_ADD_RK, dest, v, co[pos + 73], 24)
+                            return pos + 96
+                        end
+                        put(pos, FOP.NEWTABLE_LIST3_ADD_RK, dest, v, 0, 18)
+                        return pos + 72
+                    end
+                end
+
+                if co[pos] == NEWTABLE and co[pos + 4] == SETLOCAL and
+                   can(pos, 2) then
+                    put(pos, FOP.NEWTABLE_LOCAL, co[pos + 5], 0, 0, 2)
+                    return pos + 8
+                end
+
+                -- list constructor elements: MARK + (GETLOCAL | LOADK) + SETLIST
+                if pos + 8 <= n and co[pos] == MARK and
+                   (co[pos + 4] == GETLOCAL or co[pos + 4] == LOADK) and
+                   co[pos + 8] == SETLIST and can(pos, 3) then
+                    local mreg = co[pos + 1]
+                    local treg = co[pos + 9]
+                    local idx = co[pos + 10]
+                    local v = co[pos + 5]
+                    if co[pos + 4] == GETLOCAL then
+                        if v ~= mreg then
+                            put(pos, FOP.SETLIST_R, treg, idx, v, 3)
+                            return pos + 12
+                        end
+                    else
+                        put(pos, FOP.SETLIST_K, treg, idx, v, 3)
+                        return pos + 12
+                    end
+                end
+
+                -- list constructor elements: MARK + GETLOCAL + LOADK + ADD + SETLIST
+                if pos + 16 <= n and co[pos] == MARK and
+                   co[pos + 4] == GETLOCAL and
+                   co[pos + 8] == LOADK and
+                   co[pos + 12] == ADD and co[pos + 16] == SETLIST and
+                   can(pos, 5) then
+                    local mreg = co[pos + 1]
+                    local treg = co[pos + 17]
+                    local idx = co[pos + 18]
+                    local a = co[pos + 5]
+                    if a ~= mreg then
+                        put(pos, FOP.SETLIST_ADD_RK, treg, idx, a, 5)
+                        return pos + 20
+                    end
+                end
+
                 -- constant comparison directly followed by JMPF
                 if co[pos] == LOADK and jmpk[co[pos + 4]] and
                    co[pos + 8] == JMPF and can(pos, 3) then
@@ -2581,18 +3296,17 @@ local function custom_loadstring(source, env, opts)
                 end
             end
 
-            -- Fold `(value % K) == K2` + JMPF into one branch. Equality is
-            -- safe under LuaJIT; the ordering comparisons stay out of JIT.
+            -- Fold `(value % K) == K2` and `(value % reg) == K2` + JMPF into one branch.
             for pc = 1, n, 4 do
-                if co[pc] == FOP.MOD_RK and pc + 20 <= n and
-                   co[pc + 12] == FOP.JMPF_EQ_K and
+                if (co[pc] == FOP.MOD_RK or co[pc] == FOP.MOD_RR) and
+                   pc + 20 <= n and co[pc + 12] == FOP.JMPF_EQ_K and
                    not dead[pc] and not targets[pc + 4] and
                    not targets[pc + 8] and not targets[pc + 12] and
                    not targets[pc + 20] then
                     local r = co[pc + 1]
                     local kmod = co[pc + 2]
                     local keq = co[pc + 13]
-                    co[pc] = FOP.JMPF_MOD_EQ_K
+                    co[pc] = co[pc] == FOP.MOD_RK and FOP.JMPF_MOD_EQ_K or FOP.JMPF_MOD_RR_EQ_K
                     co[pc + 1] = r
                     co[pc + 2] = kmod
                     co[pc + 3] = keq
@@ -2632,6 +3346,12 @@ local function custom_loadstring(source, env, opts)
                             fused, nxt = FOP.FORLOOP_SUB_RR, body + 28
                         elseif bop == FOP.SUB_ASSIGN_RK then
                             fused, nxt = FOP.FORLOOP_SUB_RK, body + 28
+                        elseif bop == FOP.JMPF_MOD_RR_EQ_K and
+                               body + 36 <= n then
+                            fused, nxt = FOP.FORLOOP_MOD_RR_EQ_K, body + 36
+                        elseif bop == FOP.NEWTABLE_SETINDEX_R and
+                               body + 52 <= n then
+                            fused, nxt = FOP.FORLOOP_NEWTABLE_SETINDEX_R, body + 52
                         end
                         if fused then
                             co[pc] = fused

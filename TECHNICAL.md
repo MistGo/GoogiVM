@@ -46,7 +46,7 @@ Function prototypes are stored in a shared prototype list. The root chunk is its
 
 ## Bytecode
 
-Normal opcodes are numbered **1–51**. Fused opcodes produced by the optimizer are numbered **52-119** and grouped by purpose:
+Normal opcodes are numbered **1–51**. Fused opcodes produced by the optimizer are numbered **52-146** and grouped by purpose:
 
 | Range | Purpose |
 |---:|---|
@@ -55,9 +55,11 @@ Normal opcodes are numbered **1–51**. Fused opcodes produced by the optimizer 
 | 70–87 | comparisons |
 | 88–94 | table/index reads and writes |
 | 95–101 | compound assignment patterns |
-| 102–109 | conditional jumps |
-| 110-118 | numeric-for loop-variable copies and fused loop-body operations |
-| 119 | fused modulo/equality branch |
+| 102–109, 120–131 | conditional jumps |
+| 110–118, 145–146 | numeric-for loop-variable copies and fused loop-body operations |
+| 119, 142 | fused modulo/equality branches |
+| 132–133 | generic-for (`ipairs`/`pairs`/iterator) fused loops |
+| 134–141, 143–144 | table constructor, boolean store, and metamethod-aware binary accumulate fusions |
 
 The bytecode is private. It is not serialized, has no stable ABI, and should not be persisted between versions.
 
