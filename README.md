@@ -40,7 +40,10 @@ Lua 5.1 Source
   - Blocks `getfenv`/`setfenv` on native C/host functions and `setfenv(0, ...)` so untrusted code cannot escape into the host `_G`.
 - **Source-Line Tracebacks:**
   - Syntax errors report exact line numbers and nearby tokens.
-  - Runtime errors are automatically rewritten to `sourceName:line: message` with a full call-stack traceback across interpreted frames.
+  - Runtime errors are rewritten to `sourceName:line: message` with a full call-stack traceback across interpreted frames.
+  - Guest `pcall`/`xpcall` around interpreted closures keep the same sandbox format: host file paths and internal VM line numbers are never exposed.
+- **Bounded Stack for Tail Calls:**
+  - `return f(...)` reuses the current frame **and** its original stack region, so even millions of tail calls stay within a constant `maxStack` footprint.
 - **Superinstruction Peephole Optimizer (95 Fused Opcodes):**
   - Fuses local moves, constant loads, binary arithmetic, compound assignments (`s = s + i`, `s = s + t[i]`), table reads/writes (`t[k] = v`, `t.field = v`), conditional branches (`if a < b`, `if x % d == 0`), numeric `for` bodies, table constructors, and zero-overhead `ipairs`/`pairs` generic `for` loops.
 
@@ -125,11 +128,30 @@ All limits are enabled by default and can be customized per chunk or disabled in
 
 ---
 
+## Host-dependent semantics
+
+GoogiVM implements the Lua 5.1 **language**, but a few behaviors are defined by
+the host runtime and are inherited rather than re-implemented:
+
+| Area | Behavior |
+|---|---|
+| `#` on tables with holes | Follows the host's length algorithm; it is not defined as "highest integer key". |
+| `__len` | Honored only when the host honors `__len` for tables (LuaJIT and Lua 5.2+ do; plain Lua 5.1 does not). |
+| `getfenv` / `setfenv` | Available only when the host provides them. Interpreted closures (including numeric levels) are fully supported; `setfenv(0, ...)` is rejected and native function environments are blocked. |
+| Numeric formatting | `tostring(number)` uses the host formatter. |
+| Libraries | Only what you place in `env`; GoogiVM never imports `math`, `string`, or `table` itself. |
+| Metamethod dispatch | Performed by host operators, so host-specific `__eq`/`__lt`/`__le`/`__concat` quirks apply. |
+| Operator error text | Produced by the host; GoogiVM only rewrites the location prefix to `sourceName:line`. |
+| Restricted sandboxes | Scrap Mechanic may omit or proxy `setmetatable`/`getmetatable`/`rawget`/`rawset`; GoogiVM requires only the helpers it actually uses and degrades gracefully when one is absent. |
+
+If you need bit-identical behavior, run the same host version everywhere;
+GoogiVM does not ship a second standard library.
+
 ## Performance Benchmarks
 
 ### 1. In-Game Benchmark (Scrap Mechanic / Lua 5.1)
 
-Measured directly inside **Scrap Mechanic** running [`scrapcomputers-vm-benchmark.lua`](scrapcomputers-vm-benchmark.lua) against both the standard **ScrapComputers VM (FiOne)** and **SComputers (FiOne fork)**:
+Measured directly inside **Scrap Mechanic** with [`benchmarks/benchmark11.lua`](benchmarks/benchmark11.lua) against both the standard **ScrapComputers VM (FiOne)** and **SComputers (FiOne fork)**:
 
 | Workload | **GoogiVM** | ScrapComputers (FiOne, Run 1) | ScrapComputers (FiOne, Run 2) | SComputers (FiOne) | **GoogiVM vs FiOne** | **GoogiVM vs SComputers** |
 |---|---:|---:|---:|---:|---:|---:|
@@ -192,10 +214,29 @@ lua run_all_tests.lua
 ```
 
 Expected output:
-- **LuaJIT 2.1:** `TOTAL: 18681 checks, 0 failed`
-- **Lua 5.4:** `TOTAL: 18663 checks, 0 failed`
+- **LuaJIT 2.1:** `TOTAL: 18691 checks, 0 failed`
+- **Lua 5.4:** `TOTAL: 18673 checks, 0 failed`
 
 See [`tests/README.md`](tests/README.md) for a description of all 17 test modules.
+
+## Reproducible benchmarks
+
+The 11-case comparison is reproducible with the autonomous harness in
+[`benchmarks/benchmark11.lua`](benchmarks/benchmark11.lua):
+
+```bash
+luajit benchmarks/benchmark11.lua googi                 # measure GoogiVM
+luajit benchmarks/benchmark11.lua googi baseline.csv    # add ratio metrics
+luajit benchmarks/benchmark11.lua native                # host LuaJIT reference
+```
+
+It prints per-case medians, the **sum of medians** and the **geometric mean**,
+and (when `io` is available) writes `benchmark11_<label>.csv` plus a raw
+console log. Inside Scrap Mechanic, paste the file into `Main.lua`: the sandbox
+`loadstring` then measures whichever VM is active, so the identical script
+yields a paired GoogiVM / FiOne comparison.
+
+Details: [`benchmarks/README.md`](benchmarks/README.md).
 
 ---
 
@@ -207,6 +248,7 @@ README.md                    # Project overview, API, and benchmark summary
 TECHNICAL.md                 # Internal architecture and opcode reference
 BENCHMARK_50.md              # 50-case benchmark report (GoogiVM vs FiOne)
 BENCHMARK_50.csv             # Raw benchmark data
+benchmarks/                  # Reproducible 11-case harness + raw artifacts
 run_all_tests.lua            # Automated test runner
 tests/                       # 17 test modules + test suite documentation
 AGENTS.md                    # Guidelines and invariants for AI coding agents

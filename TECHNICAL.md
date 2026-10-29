@@ -97,5 +97,53 @@ A fusion is only applied if `can(pos, len)` confirms that none of the interior s
   `parse_return` marks `return f(...)` calls with `C = 1`. When `f` is an interpreted closure, `CALLD` overwrites `cur` in place and jumps to `pc = 1` without growing `fi` or consuming `maxCallDepth`.
 - **Fast Callback Entry (`info.fast`):**
   Root chunks wrap `run_closure` in `pcall` to format runtime errors with `format_runtime_error(err, trace)`. Inner closures (such as `__add` metamethods or `table.sort` comparators) set `info.fast = true` and invoke `run_closure` directly when called from the host.
+
+### 5.1 Error reporting, guest `pcall`, and sandbox hygiene
+
+`format_runtime_error(err, trace)` builds `<sourceName>:<line>: <message>` and
+appends one `at <sourceName>:<line>` line per interpreted frame.
+
+Two details keep host information out of the sandbox:
+
+1. Host operator errors arrive with a host prefix such as
+   `C:\mods\vm.lua:1771: attempt to perform arithmetic on a nil value`. The
+   prefix is stripped with a greedy-safe pattern (`^.-:%d+: ([^\n]*)`) so both
+   POSIX and Windows paths are removed before the sandbox location is added.
+2. `pcall`/`xpcall` are special-cased in `CALLD`. When the first argument is an
+   interpreted closure, the VM runs the target through `run_closure` under a
+   fresh trace instead of letting the host `pcall` capture a raw error. The
+   guest therefore sees `<string>:1: attempt to perform arithmetic ...` inside
+   `pcall`, with no `custom_loadstring_full.lua:NNNN` in the message.
+
+### 5.2 Tail-call stack reuse
+
+A tail call reuses the current frame **and** relocates the function plus its
+arguments down to the frame's original `base` before rebinding `p`, `C`, `K`,
+`base`, and `top`. Without that relocation the base drifted upward on every
+iteration, so a 600k-iteration tail-recursive loop eventually tripped
+`maxStack`. With relocation the stack footprint is constant, and
+`tests/test_tailcalls.lua` covers 600,000 iterations under the default
+`maxStack` and `maxCallDepth = 10`.
 - **LuaJIT 2.1 Comparison Workaround:**
   LuaJIT 2.1 has an upstream JIT compiler bug that can intermittently miscompile ordered relational comparisons inside large dispatch functions. GoogiVM isolates ordered comparisons in a small `compare_op` helper marked with `jit.off(compare_op)` when `jit` is present, while keeping equality/inequality fusions and arithmetic loops fully JIT-compiled.
+
+---
+
+## 6. Host-dependent semantics
+
+GoogiVM implements the Lua 5.1 language itself; the following behaviors are
+inherited from the host and are intentionally not emulated:
+
+| Area | Where it comes from |
+|---|---|
+| `#` on tables with holes | `luaH_getn` of the host; not "highest integer key". |
+| `__len` on tables | Only if the host honors it (LuaJIT, Lua 5.2+); plain Lua 5.1 ignores it. |
+| `getfenv` / `setfenv` | Host availability. Interpreted closures and numeric levels are supported; `setfenv(0, ...)` and native function environments are rejected. |
+| Number formatting | Host `tostring`. |
+| Operator error text | Host message body; only the location prefix is rewritten. |
+| Standard libraries | Whatever the embedder supplies in `env`. |
+| Metamethod dispatch | Host operators (`__eq`, `__lt`, `__le`, `__concat`, `__len`, ...). |
+| Restricted sandboxes | Missing `setmetatable`/`getmetatable`/`rawget`/`rawset` are tolerated; the VM uses only the helpers it needs (`getmetatable` is optional). |
+
+These are documented in [`README.md`](README.md) so that "Lua 5.1 compatible"
+is not read as "host-independent standard library".

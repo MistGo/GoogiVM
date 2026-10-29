@@ -93,6 +93,40 @@ return t + 1
 for k in function() error('iter') end do end
 ]])
 
+    -- Errors caught by guest pcall must keep the sandbox source location and
+    -- must not leak host file paths.
+    do
+        local chunk = assert(t.custom([[
+local ok, err = pcall(function() return nil + 1 end)
+return ok, err
+]], t.env, { sourceName = "pcall.lua" }))
+        local ran, gok, gerr = pcall(chunk)
+        t:check(ran and gok == false and type(gerr) == "string",
+            "pcall result shape: " .. tostring(gerr))
+        t:check(type(gerr) == "string" and gerr:find("pcall.lua:", 1, true) ~= nil,
+            "pcall error keeps source name: " .. tostring(gerr))
+        t:check(type(gerr) == "string" and
+            gerr:find("custom_loadstring_full", 1, true) == nil,
+            "pcall error must not leak host paths: " .. tostring(gerr))
+    end
+
+    -- xpcall handlers receive the formatted sandbox message.
+    do
+        local chunk = assert(t.custom([[
+local ok, msg = xpcall(function() error("kaboom") end, function(e) return e end)
+return ok, msg
+]], t.env, { sourceName = "xpcall.lua" }))
+        local ran, gok, gmsg = pcall(chunk)
+        t:check(ran and gok == false and type(gmsg) == "string" and
+            gmsg:find("xpcall.lua:", 1, true) ~= nil,
+            "xpcall handler formatted error: " .. tostring(gmsg))
+    end
+
+    -- Guest pcall still forwards multiple results and accepts native targets.
+    t:expect("local ok, a, b = pcall(function() return 1, 2 end); return ok, a, b",
+        P(true, 1, 2))
+    t:expect("local ok, v = pcall(string.upper, 'abc'); return ok, v", P(true, "ABC"))
+
     -- Runtime error after partial side effects keeps the side effect.
     local env = {}
     local c = assert(t:compile("x = 1; return nil + 1", env))

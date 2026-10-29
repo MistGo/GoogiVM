@@ -128,6 +128,42 @@ end)
 return co()
 ]], P(1))
 
+    -- Deep tail recursion must not grow the VM value stack.
+    do
+        local chunk, cerr = t.custom([[
+local function f(n, acc)
+    if n == 0 then return acc end
+    return f(n - 1, acc + 1)
+end
+return f(600000, 0)
+]], {}, { maxCallDepth = 10 })
+        t:check(chunk ~= nil, "deep tail recursion compile: " .. tostring(cerr))
+        if chunk then
+            local ok, value = pcall(chunk)
+            t:check(ok and value == 600000,
+                "deep tail recursion result: " .. tostring(value))
+        end
+    end
+
+    -- Tail-call argument relocation must preserve argument order.
+    t:expect([[
+local function f(a, b, c, n)
+    if n == 0 then return a * 100 + b * 10 + c end
+    return f(a, b, c, n - 1)
+end
+return f(1, 2, 3, 5000)
+]], P(123))
+
+    -- Vararg tail calls keep every argument while the frame is reused.
+    t:expect([[
+local function collect(a, b, c, ...)
+    local n = select('#', ...)
+    if a == 0 then return b + c + n end
+    return collect(a - 1, b, c, ...)
+end
+return collect(5000, 10, 20, 1, 2, 3)
+]], P(33))
+
     -- Fixed result counts still trim values.
     t:expect([[
 local function g() return 1, 2, 3 end

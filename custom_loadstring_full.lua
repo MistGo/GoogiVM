@@ -25,7 +25,6 @@ local str_match = string.match
 local str_sub = string.sub
 local str_byte = string.byte
 local str_char = string.char
-local str_gsub = string.gsub
 local tconcat = table.concat
 local tostring = tostring
 local tonumber = tonumber
@@ -165,9 +164,10 @@ local function format_runtime_error(err, trace)
         return err
     end
 
-    -- Host errors start with "file.lua:NN: ". Replace that with the
-    -- interpreted source location rather than stacking both prefixes.
-    local msg = str_gsub(err, "^[^\n:]+:%d+: ", "", 1)
+    -- Host errors start with "file.lua:NN: " (possibly a Windows path such as
+    -- "C:\mods\vm.lua:1771: ..."). Replace that with the interpreted source
+    -- location so host paths never leak into the sandbox.
+    local msg = str_match(err, "^.-:%d+: ([^\n]*)") or err
     local out = (p.sourceName or "<string>") .. ":" .. line .. ": " .. msg
 
     local frames = trace.frames
@@ -1595,6 +1595,19 @@ run_closure = function(fn, trace, ...)
                     end
                 end
 
+                -- A tail call reuses the frame, so it must also reuse the
+                -- frame's original stack region. Moving the function and its
+                -- arguments down to `base` keeps `top` bounded; otherwise the
+                -- base creeps upward on every iteration and deep tail
+                -- recursion eventually trips maxStack.
+                if tail and fpos ~= base then
+                    S[base] = f
+                    for j = 1, nargs do
+                        S[base + j] = S[fpos + j]
+                    end
+                    fpos = base
+                end
+
                 local np = cp.numparams
                 for j = 1, np do
                     if j <= nargs then
@@ -1762,6 +1775,56 @@ run_closure = function(fn, trace, ...)
                             top = top + 1
                             S[top] = nil
                         end
+                    end
+                elseif (f == pcall or (xpcall and f == xpcall)) and
+                       nargs >= 1 and closure_info[S[fpos + 1]] then
+                    -- Guest pcall/xpcall around an interpreted closure must not
+                    -- leak host paths: run the target ourselves so the error
+                    -- keeps the sandbox sourceName:line format and trace.
+                    local target = S[fpos + 1]
+                    local tr = {}
+                    local rs
+                    if f == pcall then
+                        rs = pack(pcall(run_closure, target, tr,
+                            unpack(S, fpos + 2, top)))
+                        if not rs[1] then
+                            rs[2] = format_runtime_error(rs[2], tr)
+                        end
+                    else
+                        local handler = S[fpos + 2]
+                        local args = {}
+                        for j = fpos + 3, top do
+                            args[#args + 1] = S[j]
+                        end
+                        rs = pack(xpcall(function()
+                            return run_closure(target, tr, unpack(args))
+                        end, function(err)
+                            local msg = format_runtime_error(err, tr)
+                            if handler == nil then
+                                return msg
+                            end
+                            if closure_info[handler] then
+                                return run_closure(handler, {}, msg)
+                            end
+                            return handler(msg)
+                        end))
+                    end
+                    top = ret_sp
+                    if nres == 0 then
+                        -- discard all results
+                    elseif nres == 1 then
+                        top = ret_sp + 1
+                        S[top] = rs[1]
+                    elseif nres < 0 then
+                        for j = 1, rs.n do
+                            S[ret_sp + j] = rs[j]
+                        end
+                        top = ret_sp + rs.n
+                    else
+                        for j = 1, nres do
+                            S[ret_sp + j] = rs[j]
+                        end
+                        top = ret_sp + nres
                     end
                 else
                     if nres == 0 then

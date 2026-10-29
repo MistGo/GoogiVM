@@ -7,3 +7,5 @@ Thumbs.db
 *.out
 *.log
 tmp/
+benchmark11_*.csv
+benchmark11_*_raw.txt
