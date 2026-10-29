@@ -52,7 +52,7 @@ When a local variable is declared, the compiler emits a `NOP` placeholder (`cell
 
 ---
 
-## 4. Bytecode & Superinstructions (Opcodes 1–146)
+## 4. Bytecode & Superinstructions (Opcodes 1–161)
 
 ### Base Opcodes (`1–51`)
 
@@ -68,22 +68,32 @@ When a local variable is declared, the compiler emits a `NOP` placeholder (`cell
 | `36–43` | `NEWTABLE`, `FIELD`, `INDEX`, `SETFIELD`, `SETINDEX`, `SELF`, `SETLIST`, `SETLISTMULTI` | Table creation, reads, writes, methods, and array initializers |
 | `44–50` | `MARK`, `POP`, `FORPREP`, `FORLOOP`, `CLOSURE`, `PEEK`, `NOP` | Multi-return markers, numeric `for`, closures, and stack helpers |
 
-### Fused Superinstructions (`52–146`)
+### Fused Superinstructions (`52–161`)
 
-`optimize_code(co, n)` runs after a function is compiled. **It never shifts instruction addresses:** it overwrites the first instruction of a matched pattern and marks the remaining `len - 1` instruction slots in `dead[]`. The VM advances `pc` by `4 * len` (e.g., `+8`, `+12`, `+16`, `+20`, `+24`, `+40`, `+48`, `+56`, `+72`, or `+96`).
+`optimize_code(co, n)` runs after a function is compiled. **It never shifts instruction addresses:** it overwrites the first instruction of a matched pattern and marks the remaining `len - 1` instruction slots in `dead[]`. The VM advances `pc` by `4 * len` (e.g., `+8`, `+12`, `+16`, `+20`, `+24`, `+32`, `+36`, `+40`, `+48`, `+56`, `+72`, or `+96`).
 
-A fusion is only applied if `can(pos, len)` confirms that none of the interior slots is a jump target (`targets[]`) or already dead.
+A fusion is only applied if `can(pos, len)` confirms that none of the interior slots is a jump target (`targets[]`) or already dead. `can_tail(pos, len)` relaxes this for the last slot only: it may stay a jump target because the instruction itself remains physically present and valid, while the fall-through path skips it.
+
+Several opcode families share one opcode and carry a **kind** in a dead slot (`C[pc + 4]`):
 
 | Range | Superinstructions | What They Fuse |
 |---:|---|---|
-| `52–57`, `144` | `MOVLOCAL`, `MOVLOCAL_NOP`, `MOVLOCAL_CELL`, `SETLOCAL_K`, `SETLOCAL_BOOL`, `SETLOCAL_INDEX`, `SETLOCAL_FIELD` | Direct local-to-local moves, constant/boolean stores, and `dest = t[k]` / `dest = t.field` without stack push/pop |
+| `52–57` | `MOVLOCAL`, `MOVLOCAL_NOP`, `MOVLOCAL_CELL`, `SETLOCAL_K`, `SETLOCAL_INDEX`, `SETLOCAL_FIELD` | Direct local-to-local moves, constant stores, and `dest = t[k]` / `dest = t.field` without stack push/pop |
 | `58–87` | `ADD_RR`/`RK` .. `POW_RR`/`RK`, `EQ_RR`/`RK` .. `GE_RR`/`RK`, `EQ_K` .. `GE_K` | Binary arithmetic and comparisons directly from local registers and constants |
 | `88–94` | `INDEX_RR`, `INDEX_RK`, `FIELD_R`, `SETINDEX_RR`, `SETINDEX_RK`, `SETFIELD_RV`, `SETFIELD_RK` | Single-dispatch table reads and writes (`t[k] = v`, `t.f = v`) |
-| `95–101`, `143` | `ADD_ASSIGN_RR`/`RK`/`INDEX`, `SUB_ASSIGN_RR`/`RK`, `MUL_ASSIGN_RR`/`RK`, `ADD_ASSIGN_BINOP_RR` | In-place accumulator updates (`s = s + i`, `s = s + t[i]`, `s = s + (a + b)` with in-VM `__add` metamethod frame push) |
-| `102–109`, `119–131`, `142` | `JMPF_LOCAL`, `JMPNIL_LOCAL`, `JMPF_EQ_K`..`GE_K`, `JMPF_EQ_RR`/`RK`..`GE_RR`/`RK`, `JMPF_MOD_EQ_K`, `JMPF_MOD_RR_EQ_K` | Zero-stack conditional branches (`while i < N`, `until i >= N`, `if x % d == 0`) |
-| `110–118`, `145–146` | `FORLOOP_MOV`, `FORLOOP_CELL`, `FORLOOP_ADD_RR`/`RK`/`INDEX`, `FORLOOP_SETINDEX_RR`/`RK`, `FORLOOP_SUB_RR`/`RK`, `FORLOOP_MOD_RR_EQ_K`, `FORLOOP_NEWTABLE_SETINDEX_R` | Numeric `for` step fused with loop-variable copy and the first loop-body statement/branch |
+| `102–103` | `JMPF_LOCAL`, `JMPNIL_LOCAL` | Zero-stack local tests |
+| `110–119`, `142`, `145–146` | `FORLOOP_MOV`, `FORLOOP_CELL`, `FORLOOP_ADD_RR`/`RK`/`INDEX`, `FORLOOP_SETINDEX_RR`/`RK`, `FORLOOP_SUB_RR`/`RK`, `JMPF_MOD_EQ_K`, `JMPF_MOD_RR_EQ_K`, `FORLOOP_MOD_RR_EQ_K`, `FORLOOP_NEWTABLE_SETINDEX_R` | Numeric `for` step fused with loop-variable copy and the first loop-body statement/branch, plus `x % d == k` branches |
 | `132–133` | `TFOR_2`, `TFOR_1` | Full generic `for` header fused into 1 dispatch; runs `ipairs` and `pairs`/`next` directly in-VM without per-iteration function call overhead |
 | `134–141` | `NEWTABLE_LOCAL`, `SETLIST_R`, `SETLIST_K`, `SETLIST_ADD_RK`, `NEWTABLE_FIELD_R`/`K`, `NEWTABLE_SETINDEX_R`, `NEWTABLE_LIST3_ADD_RK` | Fast table allocation and inline array/hash constructor population |
+| `143–144` | `ADD_ASSIGN_BINOP_RR`, `SETLOCAL_BOOL` | In-place update with an in-VM `__add` frame push; `dest = true/false` |
+| `147–150` | `TESTF_CMP_RR`/`RK`, `TESTT_CMP_RR`/`RK` | Comparison fused with the short-circuit test of `and`/`or`; the comparison kind (23–28) rides in the dead slot |
+| `151–153` | `JMPF_CMP_RR`, `JMPF_CMP_RK`, `JMPF_CMP_K` | Comparison fused with `JMPF` for `if`/`while`/`until`; the kind replaces 18 separate opcodes |
+| `154–156` | `ASSIGN_RR`, `ASSIGN_RK`, `ASSIGN_INDEX` | Compound assignment for all seven arithmetic operators; the operator (ADD=13 .. CONCAT=19) rides in the dead slot, replacing 7 separate opcodes |
+| `157` | `SWAP` | `a, b = b, a` |
+| `158–159` | `ASSIGN_MOD_ADD_RK`, `SETINDEX_MOD_RK` | `s = (s + i) % k` and `t[i % k] = v` |
+| `160–161` | `CLOSURE_CELL`, `SETINDEX_CLOSURE_CELL` | Per-iteration boxed loop variable plus closure creation, and `t[i] = function() return i end` |
+
+Ranges `95–101`, `104–109` and `120–131` are retired: they were folded into `ASSIGN_*` (154–156) and `JMPF_CMP_*` (151–153).
 
 ---
 
@@ -95,6 +105,8 @@ A fusion is only applied if `can(pos, len)` confirms that none of the interior s
   Returning from an interpreted call recycles the frame table into `free_frames` (up to 64 entries), eliminating table allocations on hot call paths (`fib`, recursion, closures).
 - **Tail-Call Optimization (`CALLD` with `C = 1`):**
   `parse_return` marks `return f(...)` calls with `C = 1`. When `f` is an interpreted closure, `CALLD` overwrites `cur` in place and jumps to `pc = 1` without growing `fi` or consuming `maxCallDepth`.
+- **Balanced Dispatch Tree:**
+  `run_closure` does not walk a linear `if/elseif` opcode chain. Both the base chain (1–51) and the fused chain (52–161) are generated as balanced range trees over the opcode number, with leaves of at most four exact comparisons. A hot instruction such as `ASSIGN_RK` or `JMPF_CMP_RK` is reached in about seven `op <` tests instead of sixty to ninety `elseif` tests, which keeps LuaJIT side traces short. Adding an opcode only lengthens one leaf.
 - **Fast Callback Entry (`info.fast`):**
   Root chunks wrap `run_closure` in `pcall` to format runtime errors with `format_runtime_error(err, trace)`. Inner closures (such as `__add` metamethods or `table.sort` comparators) set `info.fast = true` and invoke `run_closure` directly when called from the host.
 

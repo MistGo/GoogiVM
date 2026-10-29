@@ -49,8 +49,8 @@ Most pure-Lua interpreters (such as **FiOne** / **LBI**) are *bytecode-only* int
 Lua 5.1 Source
   -> Streaming Lexer & Single-Pass Compiler (no AST allocation)
   -> Per-Function Prototype + Line Table
-  -> Linear Peephole Superinstruction Optimizer (Opcodes 52–146)
-  -> Explicit-Frame Stack/Register VM with Frame Pooling & Tail-Call Optimization
+  -> Linear Peephole Superinstruction Optimizer (Opcodes 52-161)
+  -> Explicit-Frame Stack/Register VM (Balanced Opcode Dispatch Tree, Frame Pooling, Tail-Call Optimization)
 ```
 
 ### Key Features
@@ -69,8 +69,9 @@ Lua 5.1 Source
   - Guest `pcall`/`xpcall` around interpreted closures keep the same sandbox format: host file paths and internal VM line numbers are never exposed.
 - **Bounded Stack for Tail Calls:**
   - `return f(...)` reuses the current frame **and** its original stack region, so even millions of tail calls stay within a constant `maxStack` footprint.
-- **Superinstruction Peephole Optimizer (95 Fused Opcodes):**
-  - Fuses local moves, constant loads, binary arithmetic, compound assignments (`s = s + i`, `s = s + t[i]`), table reads/writes (`t[k] = v`, `t.field = v`), conditional branches (`if a < b`, `if x % d == 0`), numeric `for` bodies, table constructors, and zero-overhead `ipairs`/`pairs` generic `for` loops.
+- **Superinstruction Peephole Optimizer (85 Fused Opcodes):**
+  - Fuses local moves, constant loads, binary arithmetic, compound assignments (`s = s + i`, `s = s + t[i]`, `s = (s + i) % k`, `t[i % k] = v`), table reads/writes (`t[k] = v`, `t.field = v`), short-circuit comparisons (`and`/`or`), conditional branches (`if a < b`, `if x % d == 0`), numeric `for` bodies, per-iteration closures, table constructors, and zero-overhead `ipairs`/`pairs` generic `for` loops.
+  - Opcode families share a single opcode with a *kind* stored in a dead slot, so the dispatch tree stays small: all twelve comparison branches, all seven compound assignments, and the whole `and`/`or` test family each cost one opcode instead of six to eighteen.
 
 ---
 
@@ -180,9 +181,9 @@ GoogiVM does not ship a second standard library.
 
 Across 50 diverse microbenchmarks comparing **GoogiVM** against upstream **FiOne** (`SovereignSatellite/FiOne` running precompiled `luac5.1` bytecode). The figures below are the mean of **three consecutive full runs** of the suite on the same machine:
 
-- **25 wins**, **19 losses**, **6 near-ties** (within 5%).
-- **2.42x faster by total mean execution time** (`3.0410 s` vs `7.3649 s`).
-- **1.19x geometric mean speedup** across all 50 workloads.
+- **43 wins**, **5 losses**, **2 near-ties** (within 5%).
+- **3.95x faster by total mean execution time** (`1.9003 s` vs `7.5117 s`).
+- **2.12x geometric mean speedup** across all 50 workloads.
 
 Absolute seconds move with host load, so they are not comparable across sessions: an earlier session measured the same code roughly 1.5x faster in absolute terms while the ratios stayed within a few percent. The ratio columns are the stable metric.
 
@@ -190,14 +191,14 @@ Per-category mean ratios, including the losses:
 
 | Category | FiOne / GoogiVM | Notes |
 |---|---:|---|
-| Function calls | 2.37x - 3.15x | includes `method_call_100k` (2.37x) |
-| Closures / upvalues | 0.52x - 4.84x | `closure_upvalue_1m` 4.84x, but `closure_loop_capture_100k` 0.52x and `closures_create_100k` 0.67x |
-| Recursion (incl. tail) | 1.13x - 4.63x | `recursion_fact_10` 1.13x, `mutual_recursion_1000` 4.63x, `tail_recursion_1000` 4.51x |
-| `ipairs` / `pairs` / `next` | 0.84x - 1.95x | `generic_next_100k` 0.84x |
-| Metatables | 3.58x | `metatable_add_100k` |
-| Largest losses | 0.18x - 0.37x | `branch_and_or_100k` 0.18x, `repeat_sum_100k` 0.29x, `while_sum_100k` 0.30x, `table_string_keys_50k` 0.35x, `loop_mod_100k` 0.37x |
+| Function calls | 5.07x - 6.05x | `method_call_100k` 5.07x, `calls_simple_1m` 6.05x |
+| Closures / upvalues | 0.63x - 6.98x | `closure_upvalue_1m` 6.98x, but `closure_loop_capture_100k` 0.63x and `closures_create_100k` 0.73x |
+| Recursion (incl. tail) | 1.40x - 12.32x | `recursion_fact_10` 1.40x, `mutual_recursion_1000` 10.18x, `tail_recursion_1000` 12.32x |
+| `ipairs` / `pairs` / `next` | 1.48x - 4.05x | `generic_next_100k` 1.48x, `ipairs_100k` 4.05x |
+| Metatables | 7.44x | `metatable_add_100k` |
+| Largest losses | 0.63x - 0.94x | `closure_loop_capture_100k` 0.63x, `closures_create_100k` 0.73x, `branch_and_or_100k` 0.87x, `multi_assign_100k` 0.91x, `loop_mul_100k` 0.94x |
 
-The geometric mean of **1.19x** is the honest aggregate because the suite still contains real losses.
+The geometric mean of **2.12x** is the honest aggregate because the suite still contains real losses.
 
 See [`BENCHMARK_50.md`](BENCHMARK_50.md) and [`BENCHMARK_50.csv`](BENCHMARK_50.csv) for the per-case breakdown of the same three-run mean.
 
