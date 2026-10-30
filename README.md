@@ -46,7 +46,7 @@ Most pure-Lua interpreters (such as **FiOne** / **LBI**) are *bytecode-only* int
 Lua 5.1 Source
   -> Streaming Lexer & Single-Pass Compiler (no AST allocation)
   -> Per-Function Prototype + Line Table
-  -> Linear Peephole Superinstruction Optimizer (Opcodes 52-163)
+  -> Linear Peephole Superinstruction Optimizer (Opcodes 52-168)
   -> Explicit-Frame Stack/Register VM (Balanced Opcode Dispatch Tree, Frame Pooling, Tail-Call Optimization)
 ```
 
@@ -66,7 +66,7 @@ Lua 5.1 Source
   - Guest `pcall`/`xpcall` around interpreted closures keep the same sandbox format: host file paths and internal VM line numbers are never exposed.
 - **Bounded Stack for Tail Calls:**
   - `return f(...)` reuses the current frame **and** its original stack region, so even millions of tail calls stay within a constant `maxStack` footprint.
-- **Superinstruction Peephole Optimizer (87 Fused Opcodes):**
+- **Superinstruction Peephole Optimizer (92 Fused Opcodes):**
   - Fuses local moves, constant loads, binary arithmetic, compound assignments (`s = s + i`, `s = s + t[i]`, `s = (s + i) % k`, `t[i % k] = v`), multiple-assignment swaps (`a, b = b, a`), table reads/writes (`t[k] = v`, `t.field = v`), short-circuit comparisons (`and`/`or`), conditional branches (`if a < b`, `if x % d == 0`), numeric `for` bodies (including `s = s * k`, `s = s % k` and `s = s .. k`), per-iteration closures, table constructors, and zero-overhead `ipairs`/`pairs` generic `for` loops.
   - Opcode families share a single opcode with a *kind* stored in a dead slot, so the dispatch tree stays small: all twelve comparison branches, all seven compound assignments, and the whole `and`/`or` test family each cost one opcode instead of six to eighteen.
 
@@ -178,26 +178,26 @@ GoogiVM does not ship a second standard library.
 
 Across 50 diverse microbenchmarks comparing **GoogiVM** against upstream **FiOne** (`SovereignSatellite/FiOne` running precompiled `luac5.1` bytecode). Every figure below is the **median of 10 consecutive full runs** of the suite on the same machine; each run itself records the median of 7 measured iterations after 3 warm-up iterations:
 
-- **47 wins**, **3 losses**, **no near-ties** (within 5%).
-- **4.34x faster by total median execution time** (`1.1281 s` vs `4.8999 s`).
-- **2.28x geometric mean speedup** across all 50 workloads.
+- **48 wins**, **no losses**, **2 near-ties** (within 5%).
+- **4.74x faster by total median execution time** (`1.0393 s` vs `4.9249 s`).
+- **2.45x geometric mean speedup** across all 50 workloads.
 
-Ten runs are used instead of three because small samples are outlier-sensitive: a single run disrupted by the OS scheduler or the garbage collector can move a mean by tens of percent. Median, trimmed mean (fastest and slowest run dropped) and plain mean agree within a few percent on this sample — `4.34x` / `4.29x` / `4.26x` total, `2.28x` / `2.26x` / `2.26x` geometric mean — so the result is stable.
+Ten runs are used instead of three because small samples are outlier-sensitive: a single run disrupted by the OS scheduler or the garbage collector can move a mean by tens of percent. Median, trimmed mean (fastest and slowest run dropped) and plain mean agree within a few percent on this sample — `4.74x` / `4.65x` / `4.62x` total, `2.45x` / `2.43x` / `2.42x` geometric mean — so the result is stable.
 
 Absolute seconds move with host load, so they are not comparable across sessions: an earlier session measured the same code roughly 1.5x faster in absolute terms while the ratios stayed within a few percent. The ratio columns are the stable metric.
 
-Per-category median ratios, including the losses:
+Per-category median ratios:
 
 | Category | FiOne / GoogiVM | Notes |
 |---|---:|---|
-| Function calls | 5.15x - 6.12x | `calls_threearg_500k` 5.15x, `method_call_100k` 6.12x |
-| Closures / upvalues | 0.84x - 8.59x | `closure_upvalue_1m` 8.59x, but `closures_create_100k` 0.84x |
-| Recursion (incl. tail) | 1.22x - 12.36x | `recursion_fact_10` 1.22x, `mutual_recursion_1000` 12.36x, `tail_recursion_1000` 12.00x |
-| `ipairs` / `pairs` / `next` | 1.42x - 4.06x | `generic_next_100k` 1.42x, `ipairs_100k` 4.06x |
-| Metatables | 8.39x | `metatable_add_100k` |
-| Largest losses | 0.81x - 0.91x | `table_nested_50k` 0.81x, `closures_create_100k` 0.84x, `branch_and_or_100k` 0.91x |
+| Function calls | 5.73x - 6.68x | `calls_threearg_500k` 5.73x, `method_call_100k` 6.68x |
+| Closures / upvalues | 1.03x - 9.70x | `closure_upvalue_1m` 9.70x, `closure_loop_capture_100k` 1.76x, `closures_create_100k` 1.03x |
+| Recursion (incl. tail) | 1.33x - 13.71x | `recursion_fact_10` 1.33x, `mutual_recursion_1000` 13.71x, `tail_recursion_1000` 12.73x |
+| `ipairs` / `pairs` / `next` | 1.61x - 4.24x | `generic_next_100k` 1.61x, `generic_ipairs_50k` 4.24x |
+| Metatables | 9.38x | `metatable_add_100k` |
+| Only non-wins | 0.95x - 1.03x | `branch_and_or_100k` 0.95x, `closures_create_100k` 1.03x |
 
-The geometric mean of **2.28x** is the honest aggregate because the suite still contains real losses. `closures_create_100k` allocates a fresh closure per iteration — a native Lua function, a per-closure record and an entry in a weak-key registry — which is pure allocation cost rather than interpreter dispatch. `table_nested_50k` is a sub-millisecond case whose trimmed mean (0.90x) and mean (0.93x) sit above the median, so its loss is partly sampling noise.
+The geometric mean of **2.45x** is the honest aggregate: it is dominated by the sub-millisecond cases, which are the noisiest. The two cases outside the 5% win band are both allocation- or micro-timing-bound rather than dispatch-bound. `closures_create_100k` allocates a fresh closure per iteration — a native Lua function, a per-closure record and an entry in a weak-key registry — so it lands at parity. `branch_and_or_100k` is already down to a five-dispatch loop body, and its whole measurement is a few milliseconds, so it flips around parity between sessions.
 
 See [`BENCHMARK_50.md`](BENCHMARK_50.md) and [`BENCHMARK_50.csv`](BENCHMARK_50.csv) for the per-case breakdown of the same 10-run median.
 
@@ -222,6 +222,12 @@ luajit benchmarks/median_report.lua run1.csv … run10.csv
 It takes the per-case median across runs, reports wins/losses/ties on a 5% tie band, the geometric mean, and writes the aggregated `BENCHMARK_50.md` and `BENCHMARK_50.csv`. Never run two suites at the same time — the CPU contention makes the numbers meaningless.
 
 ---
+
+### ScrapComputers library benchmark
+
+[`benchmarks/benchsc.lua`](benchmarks/benchsc.lua) has two halves. The first is the classic **synthetic suite** borrowed from the 50-case head-to-head run — naive `fib`, plain calls, closure creation, upvalues, varargs, tail recursion, metatable adds, table reads/writes and constructors, `while`/`repeat`, branch and `and`/`or` chains, `loop break`, multi-assignment, concatenation, `ipairs`, `pairs`, prime counting — so a single run measures the interpreter itself. The second half measures the heavy pure-Lua libraries that ship with ScrapComputers and that computer programs actually call: AES-256 (CBC and ECB), SHA-256, MD5, Base64, Base91, LZ4, JSON encoding, QR-Code generation, the syntax highlighter, bit streams and vector maths. Everything runs inside the computer's own VM, so the times include interpreter overhead.
+
+Paste it into a computer's `Main.lua` and run it. Each library is looked up as a plain global (`aes256`), under the documented `sc.*` namespace (`sc.aes256`), or in the addon registry (`sm.scrapcomputers.aes256`), so the same file also works in other computer mods that expose the ScrapComputers addon API. Libraries that the environment does not expose are skipped, so the file also runs on a plain Lua host as a harness smoke test. The `SCALE` constant at the top multiplies every workload size.
 
 ## Architecture Overview
 

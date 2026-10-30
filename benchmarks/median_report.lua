@@ -106,7 +106,7 @@ end
 local md = {
     "# 50 head-to-head benchmarks: GoogiVM vs FiOne vs LuaJIT native",
     "",
-    "Date: 2026-10-29",
+    "Date: " .. os.date("%Y-%m-%d"),
     "Host: Lua 5.1 (LuaJIT 2.1.1720049189)",
     "Owner: current `custom_loadstring_full.lua`",
     "FiOne: `SovereignSatellite/FiOne` @ `18cf0113dcef568b6b679096e372c7bbf7ac6d27`",

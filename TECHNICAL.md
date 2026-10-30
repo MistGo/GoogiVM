@@ -52,7 +52,7 @@ When a local variable is declared, the compiler emits a `NOP` placeholder (`cell
 
 ---
 
-## 4. Bytecode & Superinstructions (Opcodes 1–163)
+## 4. Bytecode & Superinstructions (Opcodes 1–168)
 
 ### Base Opcodes (`1–51`)
 
@@ -68,7 +68,7 @@ When a local variable is declared, the compiler emits a `NOP` placeholder (`cell
 | `36–43` | `NEWTABLE`, `FIELD`, `INDEX`, `SETFIELD`, `SETINDEX`, `SELF`, `SETLIST`, `SETLISTMULTI` | Table creation, reads, writes, methods, and array initializers |
 | `44–50` | `MARK`, `POP`, `FORPREP`, `FORLOOP`, `CLOSURE`, `PEEK`, `NOP` | Multi-return markers, numeric `for`, closures, and stack helpers |
 
-### Fused Superinstructions (`52–163`)
+### Fused Superinstructions (`52–168`)
 
 `optimize_code(co, n)` runs after a function is compiled. **It never shifts instruction addresses:** it overwrites the first instruction of a matched pattern and marks the remaining `len - 1` instruction slots in `dead[]`. The VM advances `pc` by `4 * len` (e.g., `+8`, `+12`, `+16`, `+20`, `+24`, `+32`, `+36`, `+40`, `+48`, `+56`, `+72`, or `+96`).
 
@@ -93,6 +93,8 @@ Several opcode families share one opcode and carry a **kind** in a dead slot (`C
 | `158–159` | `ASSIGN_MOD_ADD_RK`, `SETINDEX_MOD_RK` | `s = (s + i) % k` and `t[i % k] = v` |
 | `160–161` | `CLOSURE_CELL`, `SETINDEX_CLOSURE_CELL` | Per-iteration boxed loop variable plus closure creation, and `t[i] = function() return i end` |
 | `162–163` | `FORLOOP_ASSIGN_RR`, `FORLOOP_ASSIGN_RK` | Numeric `for` step fused with a loop-body assignment for `*`, `/`, `%`, `^` and `..`; the operator rides in the dead slot (`13`–`19` encoding) |
+| `164–166` | `PUSH_OP_RK`, `PUSH_OP_RS`, `PUSH_OP_KS` | Left-to-right arithmetic chains (`k <op> a`, `<stack> <op> a`, `<stack> <op> k`) that the register-only `*_RR`/`*_RK` opcodes cannot cover; the operator rides in the dead slot (`13`–`19`) |
+| `167–168` | `ASSIGN_TO_RR`, `ASSIGN_TO_RK` | `dest = a <op> b` when the destination is not the left operand (for example `zr2 = zr * zr`): one dispatch instead of an arithmetic opcode plus `SETLOCAL`; the operator rides in the dead slot (`13`–`19`) |
 
 Ranges `95–101`, `104–109` and `120–131` are retired: they were folded into `ASSIGN_*` (154–156) and `JMPF_CMP_*` (151–153).
 
@@ -142,7 +144,7 @@ iteration, so a 600k-iteration tail-recursive loop eventually tripped
 `tests/test_tailcalls.lua` covers 600,000 iterations under the default
 `maxStack` and `maxCallDepth = 10`.
 - **LuaJIT 2.1 Comparison Workaround:**
-  LuaJIT 2.1 has an upstream JIT compiler bug that can intermittently miscompile ordered relational comparisons inside large dispatch functions. GoogiVM isolates ordered comparisons in a small `compare_op` helper marked with `jit.off(compare_op)` when `jit` is present, while keeping equality/inequality fusions and arithmetic loops fully JIT-compiled.
+  LuaJIT 2.1 has an upstream JIT compiler bug that can intermittently miscompile ordered relational comparisons inside large dispatch functions. Ordering comparisons therefore go through the module-scope helpers `cmp_lt`/`cmp_le`/`cmp_gt`/`cmp_ge` (numeric fast path, otherwise `compare_op`, which is `jit.off`), while equality and inequality stay direct. `has_jit` also consults `jit.status()`: when LuaJIT is present but its JIT is disabled (the usual modding configuration) the ordering fusions and the direct comparison path are enabled again. The per-instruction instruction budget is skipped when the limit is `math.huge`, and the current `pc` is kept in `trace[1]` rather than a hash field.
 
 ---
 
