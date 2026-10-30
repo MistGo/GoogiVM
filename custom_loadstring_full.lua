@@ -172,6 +172,8 @@ local FOP = {
 
     ADD_RR_ADD_K = 187, MUL_DIV_K = 188,
     ADD_R_ADD_K = 189, DIV_RET = 190,
+    -- `env.name.field` pushed as one value (for `math.sqrt`, `string.sub`, ...).
+    GETGLOBAL_FIELD = 191,
 
     -- Generic form: operands are encoded as +reg or -upvalue.
     SETINDEX_MUL3 = 193,
@@ -2286,6 +2288,11 @@ run_closure = function(fn, trace, ...)
                                     maxreg = p.maxreg
                                     va = cur.va
                                     pc = cur.pc
+                                elseif op == 191 then
+                                    local g = e[K[C[pc + 1]]]
+                                    top = top + 1
+                                    S[top] = g[K[C[pc + 2]]]
+                                    pc = pc + 8
                                 elseif op == 193 then
                                     local t = S[base + C[pc + 1] - 1]
                                     local k = S[base + C[pc + 2] - 1]
@@ -4675,6 +4682,13 @@ local function custom_loadstring(source, env, opts)
                 if co[pos] == GETLOCAL and co[pos + 4] == FIELD and
                    can(pos, 2) then
                     put(pos, FOP.FIELD_R, co[pos + 1], co[pos + 5], 0, 2)
+                    return pos + 8
+                end
+
+                -- global.field, e.g. math.sqrt or string.sub
+                if co[pos] == GETGLOBAL and co[pos + 4] == FIELD and
+                   can(pos, 2) then
+                    put(pos, FOP.GETGLOBAL_FIELD, co[pos + 1], co[pos + 5], 0, 2)
                     return pos + 8
                 end
 

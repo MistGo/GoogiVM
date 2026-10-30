@@ -66,7 +66,7 @@ Lua 5.1 Source
   - Guest `pcall`/`xpcall` around interpreted closures keep the same sandbox format: host file paths and internal VM line numbers are never exposed.
 - **Bounded Stack for Tail Calls:**
   - `return f(...)` reuses the current frame **and** its original stack region, so even millions of tail calls stay within a constant `maxStack` footprint.
-- **Superinstruction Peephole Optimizer (129 Fused Opcodes + Leaf Inlining):**
+- **Superinstruction Peephole Optimizer (130 Fused Opcodes + Leaf Inlining):**
   - Fuses local moves, constant loads, binary arithmetic, compound assignments (`s = s + i`, `s = s + t[i]`, `s = (s + i) % k`, `t[i % k] = v`), multiple-assignment swaps (`a, b = b, a`), table reads/writes (`t[k] = v`, `t.field = v`), short-circuit comparisons (`and`/`or`), conditional branches (`if a < b`, `if x % d == 0`), numeric `for` bodies (including `s = s * k`, `s = s % k` and `s = s .. k`), per-iteration closures, table constructors, and `ipairs`/`pairs` generic `for` loops that run the iterator and the loop step inside one dispatch (`TFOR_1`/`TFOR_2`) instead of a dispatch-heavy sequence.
   - Opcode families share a single opcode with a *kind* stored in a dead slot, so the dispatch tree stays small: all twelve comparison branches, all seven compound assignments, and the whole `and`/`or` test family each cost one opcode instead of six to eighteen.
 
@@ -307,8 +307,8 @@ lua run_all_tests.lua
 ```
 
 Expected output:
-- **LuaJIT 2.1.1720049189:** `TOTAL: 18731 checks, 0 failed`
-- **Lua 5.4.6:** `TOTAL: 18707 checks, 0 failed`
+- **LuaJIT 2.1.1720049189:** `TOTAL: 18732 checks, 0 failed`
+- **Lua 5.4.6:** `TOTAL: 18708 checks, 0 failed`
 
 See [`tests/README.md`](tests/README.md) for a description of all 17 test modules.
 

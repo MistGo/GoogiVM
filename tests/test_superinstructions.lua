@@ -49,6 +49,13 @@ t[i], t[j] = t[j], t[i]
 return t[1], t[2], t[3]
 ]], P(30, 20, 10))
 
+    -- Global field lookup: math.sqrt in the hot loop.
+    t:expect([[
+local s = 0
+for i = 1, 9 do s = s + math.sqrt(i) end
+return math.floor(s)
+]], P(19))
+
     -- Local copy/constant assignment fusion.
     t:expect([[
 local a = 1
