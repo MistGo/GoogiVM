@@ -300,6 +300,20 @@ end
 return a
 ]], P(20))
 
+    -- Inlined `k / x` leaf keeps the constant out of the stack.
+    t:expect([[
+local function half(x) return 1.0 / x end
+return half(4), half(2)
+]], P(0.25, 0.5))
+
+    -- `acc = acc + v * (k / x)` at the end of a numeric for.
+    t:expect([[
+local v = {1, 2, 3}
+local acc = 0
+for j = 1, 3 do acc = acc + v[j] * (1.0 / j) end
+return acc
+]], P(3))
+
     -- Inlined leaf call whose argument is captured later.
     t:expect([[
 local a = 10

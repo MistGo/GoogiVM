@@ -68,7 +68,7 @@ When a local variable is declared, the compiler emits a `NOP` placeholder (`cell
 | `36–43` | `NEWTABLE`, `FIELD`, `INDEX`, `SETFIELD`, `SETINDEX`, `SELF`, `SETLIST`, `SETLISTMULTI` | Table creation, reads, writes, methods, and array initializers |
 | `44–50` | `MARK`, `POP`, `FORPREP`, `FORLOOP`, `CLOSURE`, `PEEK`, `NOP` | Multi-return markers, numeric `for`, closures, and stack helpers |
 
-### Fused Superinstructions (`52–206`)
+### Fused Superinstructions (`52–208`)
 
 `optimize_code(co, n)` runs after a function is compiled. **It never shifts instruction addresses:** it overwrites the first instruction of a matched pattern and marks the remaining `len - 1` instruction slots in `dead[]`. The VM advances `pc` by `4 * len` (e.g., `+8`, `+12`, `+16`, `+20`, `+24`, `+32`, `+36`, `+40`, `+48`, `+56`, `+72`, or `+96`).
 
@@ -111,12 +111,14 @@ Several opcode families share one opcode and carry a **kind** in a dead slot (`C
 | `204` | `MUL_ADD_SETLOCAL_FORLOOP` | `dest = c + b*a` immediately followed by the numeric-for back-edge |
 | `205` | `INDEX_ADD_RK_CALL_U_RR2` | `v[j + k]` pushed immediately before a two-argument upvalue call; the index result stays below the call result on the stack |
 | `206` | `DIV_MUL_ADD_SETLOCAL_FORLOOP` | `acc = acc + v * (a / b)` at the end of a numeric `for` |
+| `207` | `DIV_K` | `k / x`, used when inlining a leaf whose constant numerator can stay out of the caller stack |
+| `208` | `DIV_K_MUL_ADD_SETLOCAL_FORLOOP` | `DIV_K` followed by the loop-end multiply/add/store |
 
 Opcode numbers `185–186`, `191–192` and `197` are unused gaps.
 
 ### Leaf-Function Inlining
 
-`compile_funcbody` keeps an unoptimized `rawcode` copy and marks a prototype `simple` when it has no upvalues, no branches, calls, cells or locals, and its body is one arithmetic `return`. At a call site whose target is a known local/upvalue function (`func_idx`), the compiler expands the raw instructions directly into the caller: parameter reads are remapped to the caller's argument registers (or constants), `LOADK` indices are merged into the caller's constant table, and the final `RET 1` is simply omitted so the value stays on the caller stack. Inlined instructions keep the callee's line numbers for tracebacks. A caller that contains inlined code is marked `has_inline`; calls to it are compiled with `CALLD` C = 2 instead of the tail-call marker 1, so the frame is retained and an inlined error still produces an `at file:line` frame. Ranges `95–101`, `104–109` and `120–131` are retired: they were folded into `ASSIGN_*` (154–156) and `JMPF_CMP_*` (151–153).
+`compile_funcbody` keeps an unoptimized `rawcode` copy and marks a prototype `simple` when it has no upvalues, no branches, calls, cells or locals, and its body is one arithmetic `return`. At a call site whose target is a known local/upvalue function (`func_idx`), the compiler expands the raw instructions directly into the caller: parameter reads are remapped to the caller's argument registers (or constants), `LOADK` indices are merged into the caller's constant table, and the final `RET 1` is simply omitted so the value stays on the caller stack. If the first constant survives to a final `DIV` as the numerator, it is folded into `DIV_K` instead of being pushed. Inlined instructions keep the callee's line numbers for tracebacks. A caller that contains inlined code is marked `has_inline`; calls to it are compiled with `CALLD` C = 2 instead of the tail-call marker 1, so the frame is retained and an inlined error still produces an `at file:line` frame. Ranges `95–101`, `104–109` and `120–131` are retired: they were folded into `ASSIGN_*` (154–156) and `JMPF_CMP_*` (151–153).
 
 ---
 
@@ -131,7 +133,7 @@ Opcode numbers `185–186`, `191–192` and `197` are unused gaps.
 - **Entry NOP Skip:**
   `emit_cell` reserves one `NOP` slot per parameter/local in case it is captured later and must become a `CELL`. At the end of compilation, `proto.entry` points at the first non-`NOP` instruction; frame setup starts there, so uncaptured parameter placeholders are never dispatched. Captured slots have already been rewritten to `CELL`, so they are still executed.
 - **Balanced Dispatch Tree:**
-  `run_closure` does not walk a linear `if/elseif` opcode chain. Both the base chain (1–51) and the fused chain (52–206) are generated as balanced range trees over the opcode number, with leaves of at most four exact comparisons. A hot instruction such as `ASSIGN_RK` or `JMPF_CMP_RK` is reached in about seven `op <` tests instead of sixty to ninety `elseif` tests, which keeps LuaJIT side traces short. Adding an opcode only lengthens one leaf.
+  `run_closure` does not walk a linear `if/elseif` opcode chain. Both the base chain (1–51) and the fused chain (52–208) are generated as balanced range trees over the opcode number, with leaves of at most four exact comparisons. A hot instruction such as `ASSIGN_RK` or `JMPF_CMP_RK` is reached in about seven `op <` tests instead of sixty to ninety `elseif` tests, which keeps LuaJIT side traces short. Adding an opcode only lengthens one leaf.
 - **Fast Callback Entry (`info[4]`):**
   Root chunks wrap `run_closure` in `pcall` to format runtime errors with `format_runtime_error(err, trace)`. Inner closures (such as `__add` metamethods or `table.sort` comparators) set `info[4] = true` and invoke `run_closure` directly when called from the host.
 - **Flat Closure Record:**
