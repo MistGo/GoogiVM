@@ -291,6 +291,42 @@ end
 return count()
 ]], P(2))
 
+    -- `(a - b) + c` must keep `__sub` / `__add` operand order.
+    t:expect([[
+local log = {}
+local mt = {
+    __sub = function(a, b) log[#log + 1] = 's' .. a.n .. b.n; return {n = a.n - b.n} end,
+    __add = function(a, b) log[#log + 1] = 'a' .. a.n .. b.n; return {n = a.n + b.n} end,
+}
+local x = setmetatable({n = 10}, mt)
+local y = setmetatable({n = 3}, mt)
+local z = setmetatable({n = 4}, mt)
+local r = x - y + z
+return r.n, table.concat(log, ',')
+]], P(11, "s103,a74"))
+
+    -- `a + b < k` fused branch.
+    t:expect([[
+local s = 0
+for i = 1, 10 do
+    if i + i < 15 then s = s + 1 end
+end
+return s
+]], P(7))
+
+    -- Nested table read `t[a][b]` with both `__index` calls in order.
+    t:expect([[
+local log = {}
+local inner = setmetatable({}, {
+    __index = function(_, k) log[#log + 1] = 'i' .. k; return k * 10 end,
+})
+local outer = setmetatable({}, {
+    __index = function(_, k) log[#log + 1] = 'o' .. k; return inner end,
+})
+local a, b = 2, 3
+return outer[a][b], table.concat(log, ',')
+]], P(30, "o2,i3"))
+
     -- Fused indexed update must keep `__index` / `__newindex` order.
     t:expect([[
 local log = {}

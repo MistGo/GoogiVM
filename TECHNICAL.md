@@ -68,7 +68,7 @@ When a local variable is declared, the compiler emits a `NOP` placeholder (`cell
 | `36–43` | `NEWTABLE`, `FIELD`, `INDEX`, `SETFIELD`, `SETINDEX`, `SELF`, `SETLIST`, `SETLISTMULTI` | Table creation, reads, writes, methods, and array initializers |
 | `44–50` | `MARK`, `POP`, `FORPREP`, `FORLOOP`, `CLOSURE`, `PEEK`, `NOP` | Multi-return markers, numeric `for`, closures, and stack helpers |
 
-### Fused Superinstructions (`52–200`)
+### Fused Superinstructions (`52–203`)
 
 `optimize_code(co, n)` runs after a function is compiled. **It never shifts instruction addresses:** it overwrites the first instruction of a matched pattern and marks the remaining `len - 1` instruction slots in `dead[]`. The VM advances `pc` by `4 * len` (e.g., `+8`, `+12`, `+16`, `+20`, `+24`, `+32`, `+36`, `+40`, `+48`, `+56`, `+72`, or `+96`).
 
@@ -105,6 +105,9 @@ Several opcode families share one opcode and carry a **kind** in a dead slot (`C
 | `198` | `INDEX_ADD_RK` | `t[a + k]`: `GETLOCAL t; ADD_RK a k; INDEX` collapsed into one dispatch |
 | `199` | `MUL_ADD_SETLOCAL` | `dest = c + b * a` for the stack form `MUL; ADD; SETLOCAL`, preserving `__mul`/`__add` operand order |
 | `200` | `INDEX_CMP_JMPF` | `t[k] <op> v` fused with `JMPF`; the table is a local/upvalue and the right operand is a local/constant. Operand descriptors use `+register` and `-upvalue`/`-constant` |
+| `201` | `ASSIGN_SUB_ADD` | `dest = (a - b) + c` for the mandelbrot `zr` update |
+| `202` | `ADD_JMPF_K` | `(a + b) <op> k` fused with `JMPF` |
+| `203` | `INDEX_INDEX_RR` | `t[a][b]`: `INDEX_RR; GETLOCAL b; INDEX` collapsed into one dispatch |
 
 Opcode numbers `185–186`, `191–192` and `197` are unused gaps. Ranges `95–101`, `104–109` and `120–131` are retired: they were folded into `ASSIGN_*` (154–156) and `JMPF_CMP_*` (151–153).
 
@@ -121,7 +124,7 @@ Opcode numbers `185–186`, `191–192` and `197` are unused gaps. Ranges `95–
 - **Entry NOP Skip:**
   `emit_cell` reserves one `NOP` slot per parameter/local in case it is captured later and must become a `CELL`. At the end of compilation, `proto.entry` points at the first non-`NOP` instruction; frame setup starts there, so uncaptured parameter placeholders are never dispatched. Captured slots have already been rewritten to `CELL`, so they are still executed.
 - **Balanced Dispatch Tree:**
-  `run_closure` does not walk a linear `if/elseif` opcode chain. Both the base chain (1–51) and the fused chain (52–200) are generated as balanced range trees over the opcode number, with leaves of at most four exact comparisons. A hot instruction such as `ASSIGN_RK` or `JMPF_CMP_RK` is reached in about seven `op <` tests instead of sixty to ninety `elseif` tests, which keeps LuaJIT side traces short. Adding an opcode only lengthens one leaf.
+  `run_closure` does not walk a linear `if/elseif` opcode chain. Both the base chain (1–51) and the fused chain (52–203) are generated as balanced range trees over the opcode number, with leaves of at most four exact comparisons. A hot instruction such as `ASSIGN_RK` or `JMPF_CMP_RK` is reached in about seven `op <` tests instead of sixty to ninety `elseif` tests, which keeps LuaJIT side traces short. Adding an opcode only lengthens one leaf.
 - **Fast Callback Entry (`info[4]`):**
   Root chunks wrap `run_closure` in `pcall` to format runtime errors with `format_runtime_error(err, trace)`. Inner closures (such as `__add` metamethods or `table.sort` comparators) set `info[4] = true` and invoke `run_closure` directly when called from the host.
 - **Flat Closure Record:**
