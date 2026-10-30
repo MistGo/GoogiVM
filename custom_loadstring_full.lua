@@ -174,6 +174,8 @@ local FOP = {
     ADD_R_ADD_K = 189, DIV_RET = 190,
     -- `env.name.field` pushed as one value (for `math.sqrt`, `string.sub`, ...).
     GETGLOBAL_FIELD = 191,
+    -- `PUSH_OP_RS` immediately followed by `ADD`.
+    PUSH_OP_RS_ADD = 192,
 
     -- Generic form: operands are encoded as +reg or -upvalue.
     SETINDEX_MUL3 = 193,
@@ -2341,6 +2343,23 @@ run_closure = function(fn, trace, ...)
                                     top = top + 1
                                     S[top] = g[K[C[pc + 2]]]
                                     pc = pc + 8
+                                elseif op == 192 then
+                                    local x = S[top]
+                                    local y = S[base + C[pc + 1] - 1]
+                                    local kind = C[pc + 2]
+                                    local v
+                                    if kind == 13 then v = x + y
+                                    elseif kind == 14 then v = x - y
+                                    elseif kind == 15 then v = x * y
+                                    elseif kind == 16 then v = x / y
+                                    elseif kind == 17 then v = x % y
+                                    elseif kind == 18 then v = x ^ y
+                                    else v = x .. y end
+                                    local prev = S[top - 1]
+                                    S[top] = nil
+                                    S[top - 1] = prev + v
+                                    top = top - 1
+                                    pc = pc + 12
                                 elseif op == 193 then
                                     local t = S[base + C[pc + 1] - 1]
                                     local k = S[base + C[pc + 2] - 1]
@@ -5036,8 +5055,13 @@ local function custom_loadstring(source, env, opts)
             -- Higher-order arithmetic fusions
             for pc = 1, n, 4 do
                 if not dead[pc] then
+                    -- PUSH_OP_RS + ADD -> PUSH_OP_RS_ADD
+                    if pc + 8 <= n and co[pc] == FOP.PUSH_OP_RS and
+                       not dead[pc + 8] and co[pc + 8] == ADD and
+                       not targets[pc + 8] then
+                        put(pc, FOP.PUSH_OP_RS_ADD, co[pc + 1], co[pc + 4], 0, 3)
                     -- ADD_RR + PUSH_OP_KS(ADD) -> ADD_RR_ADD_K
-                    if pc + 16 <= n and co[pc] == FOP.ADD_RR and
+                    elseif pc + 16 <= n and co[pc] == FOP.ADD_RR and
                        not dead[pc + 12] and co[pc + 12] == FOP.PUSH_OP_KS and
                        co[pc + 16] == 13 and not targets[pc + 12] then
                         local r1 = co[pc + 1]

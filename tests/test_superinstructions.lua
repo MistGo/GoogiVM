@@ -56,6 +56,14 @@ for i = 1, 9 do s = s + math.sqrt(i) end
 return math.floor(s)
 ]], P(19))
 
+    -- PUSH_OP_RS followed by ADD: score = score + board[i] * i.
+    t:expect([[
+local board = {1, 2, 3}
+local score = 0
+for i = 1, 3 do score = score + board[i] * i end
+return score
+]], P(14))
+
     -- Local copy/constant assignment fusion.
     t:expect([[
 local a = 1
