@@ -300,6 +300,15 @@ end
 return a
 ]], P(20))
 
+    -- Inlined leaf call whose argument is captured later.
+    t:expect([[
+local a = 10
+local function id(x) return x end
+local r = id(a)
+local function captured() return a end
+return r, captured()
+]], P(10, 10))
+
     -- Indexed read immediately followed by a two-argument upvalue call.
     t:expect([[
 local v = {10, 20, 30}

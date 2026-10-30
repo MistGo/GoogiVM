@@ -189,6 +189,9 @@ local FOP = {
     MUL_ADD_SETLOCAL_FORLOOP = 204,
     -- `v[j + k]` pushed immediately before a two-argument upvalue call.
     INDEX_ADD_RK_CALL_U_RR2 = 205,
+    -- `acc = acc + v * (a / b)` at the end of a numeric for.
+    DIV_MUL_ADD_SETLOCAL_FORLOOP = 206,
+
 }
 
 local run_closure
@@ -727,7 +730,7 @@ run_closure = function(fn, trace, ...)
             -- Fast-path ordering for the hottest fused opcodes.
 
             -- Balanced dispatch tree (generated): ~5 compares instead of ~90.
-            if op < 138 then
+            if op < 139 then
                 if op < 82 then
                     if op < 66 then
                         if op < 58 then
@@ -1000,7 +1003,7 @@ run_closure = function(fn, trace, ...)
                             end
                         end
                     else
-                        if op < 117 then
+                        if op < 118 then
                             if op < 113 then
                                 if op == 110 then
                                     local r = base + C[pc + 1] - 1
@@ -1051,108 +1054,114 @@ run_closure = function(fn, trace, ...)
                                     error("bad fused bytecode", 0)
                                 end
                             else
-                                if op == 113 then
-                                    local r = base + C[pc + 1] - 1
-                                    local step = S[r + 2]
-                                    local limit = S[r + 1]
-                                    local idx = S[r] + step
-                                    if (step > 0 and idx <= limit) or
-                                       (step < 0 and idx >= limit) then
-                                        S[r] = idx
-                                        S[base + C[pc + 2] - 1] = idx
-                                        local body = C[pc + 3]
-                                        trace[1] = body + 12
-                                        local a = base + C[body + 13] - 1
-                                        S[a] = S[a] + K[C[body + 14]]
-                                        local nxt = body + 28
-                                        if nxt ~= pc then pc = nxt end
+                                if op < 115 then
+                                    if op == 113 then
+                                        local r = base + C[pc + 1] - 1
+                                        local step = S[r + 2]
+                                        local limit = S[r + 1]
+                                        local idx = S[r] + step
+                                        if (step > 0 and idx <= limit) or
+                                           (step < 0 and idx >= limit) then
+                                            S[r] = idx
+                                            S[base + C[pc + 2] - 1] = idx
+                                            local body = C[pc + 3]
+                                            trace[1] = body + 12
+                                            local a = base + C[body + 13] - 1
+                                            S[a] = S[a] + K[C[body + 14]]
+                                            local nxt = body + 28
+                                            if nxt ~= pc then pc = nxt end
+                                        else
+                                            pc = pc + 4
+                                        end
+                                    elseif op == 114 then
+                                        local r = base + C[pc + 1] - 1
+                                        local step = S[r + 2]
+                                        local limit = S[r + 1]
+                                        local idx = S[r] + step
+                                        if (step > 0 and idx <= limit) or
+                                           (step < 0 and idx >= limit) then
+                                            S[r] = idx
+                                            S[base + C[pc + 2] - 1] = idx
+                                            local body = C[pc + 3]
+                                            trace[1] = body + 12
+                                            local a = base + C[body + 13] - 1
+                                            local t = S[base + C[body + 14] - 1]
+                                            local k = S[base + C[body + 15] - 1]
+                                            S[a] = S[a] + t[k]
+                                            local nxt = body + 36
+                                            if nxt ~= pc then pc = nxt end
+                                        else
+                                            pc = pc + 4
+                                        end
                                     else
-                                        pc = pc + 4
-                                    end
-                                elseif op == 114 then
-                                    local r = base + C[pc + 1] - 1
-                                    local step = S[r + 2]
-                                    local limit = S[r + 1]
-                                    local idx = S[r] + step
-                                    if (step > 0 and idx <= limit) or
-                                       (step < 0 and idx >= limit) then
-                                        S[r] = idx
-                                        S[base + C[pc + 2] - 1] = idx
-                                        local body = C[pc + 3]
-                                        trace[1] = body + 12
-                                        local a = base + C[body + 13] - 1
-                                        local t = S[base + C[body + 14] - 1]
-                                        local k = S[base + C[body + 15] - 1]
-                                        S[a] = S[a] + t[k]
-                                        local nxt = body + 36
-                                        if nxt ~= pc then pc = nxt end
-                                    else
-                                        pc = pc + 4
-                                    end
-                                elseif op == 115 then
-                                    local r = base + C[pc + 1] - 1
-                                    local step = S[r + 2]
-                                    local limit = S[r + 1]
-                                    local idx = S[r] + step
-                                    if (step > 0 and idx <= limit) or
-                                       (step < 0 and idx >= limit) then
-                                        S[r] = idx
-                                        S[base + C[pc + 2] - 1] = idx
-                                        local body = C[pc + 3]
-                                        trace[1] = body + 12
-                                        local t = S[base + C[body + 13] - 1]
-                                        local k = S[base + C[body + 14] - 1]
-                                        t[k] = S[base + C[body + 15] - 1]
-                                        local nxt = body + 36
-                                        if nxt ~= pc then pc = nxt end
-                                    else
-                                        pc = pc + 4
-                                    end
-                                elseif op == 116 then
-                                    local r = base + C[pc + 1] - 1
-                                    local step = S[r + 2]
-                                    local limit = S[r + 1]
-                                    local idx = S[r] + step
-                                    if (step > 0 and idx <= limit) or
-                                       (step < 0 and idx >= limit) then
-                                        S[r] = idx
-                                        S[base + C[pc + 2] - 1] = idx
-                                        local body = C[pc + 3]
-                                        trace[1] = body + 12
-                                        local t = S[base + C[body + 13] - 1]
-                                        local k = S[base + C[body + 14] - 1]
-                                        t[k] = K[C[body + 15]]
-                                        local nxt = body + 36
-                                        if nxt ~= pc then pc = nxt end
-                                    else
-                                        pc = pc + 4
+                                        error("bad fused bytecode", 0)
                                     end
                                 else
-                                    error("bad fused bytecode", 0)
+                                    if op == 115 then
+                                        local r = base + C[pc + 1] - 1
+                                        local step = S[r + 2]
+                                        local limit = S[r + 1]
+                                        local idx = S[r] + step
+                                        if (step > 0 and idx <= limit) or
+                                           (step < 0 and idx >= limit) then
+                                            S[r] = idx
+                                            S[base + C[pc + 2] - 1] = idx
+                                            local body = C[pc + 3]
+                                            trace[1] = body + 12
+                                            local t = S[base + C[body + 13] - 1]
+                                            local k = S[base + C[body + 14] - 1]
+                                            t[k] = S[base + C[body + 15] - 1]
+                                            local nxt = body + 36
+                                            if nxt ~= pc then pc = nxt end
+                                        else
+                                            pc = pc + 4
+                                        end
+                                    elseif op == 116 then
+                                        local r = base + C[pc + 1] - 1
+                                        local step = S[r + 2]
+                                        local limit = S[r + 1]
+                                        local idx = S[r] + step
+                                        if (step > 0 and idx <= limit) or
+                                           (step < 0 and idx >= limit) then
+                                            S[r] = idx
+                                            S[base + C[pc + 2] - 1] = idx
+                                            local body = C[pc + 3]
+                                            trace[1] = body + 12
+                                            local t = S[base + C[body + 13] - 1]
+                                            local k = S[base + C[body + 14] - 1]
+                                            t[k] = K[C[body + 15]]
+                                            local nxt = body + 36
+                                            if nxt ~= pc then pc = nxt end
+                                        else
+                                            pc = pc + 4
+                                        end
+                                    elseif op == 117 then
+                                        local r = base + C[pc + 1] - 1
+                                        local step = S[r + 2]
+                                        local limit = S[r + 1]
+                                        local idx = S[r] + step
+                                        if (step > 0 and idx <= limit) or
+                                           (step < 0 and idx >= limit) then
+                                            S[r] = idx
+                                            S[base + C[pc + 2] - 1] = idx
+                                            local body = C[pc + 3]
+                                            trace[1] = body + 12
+                                            local a = base + C[body + 13] - 1
+                                            local b = base + C[body + 14] - 1
+                                            S[a] = S[a] - S[b]
+                                            local nxt = body + 28
+                                            if nxt ~= pc then pc = nxt end
+                                        else
+                                            pc = pc + 4
+                                        end
+                                    else
+                                        error("bad fused bytecode", 0)
+                                    end
                                 end
                             end
                         else
-                            if op < 133 then
-                                if op == 117 then
-                                    local r = base + C[pc + 1] - 1
-                                    local step = S[r + 2]
-                                    local limit = S[r + 1]
-                                    local idx = S[r] + step
-                                    if (step > 0 and idx <= limit) or
-                                       (step < 0 and idx >= limit) then
-                                        S[r] = idx
-                                        S[base + C[pc + 2] - 1] = idx
-                                        local body = C[pc + 3]
-                                        trace[1] = body + 12
-                                        local a = base + C[body + 13] - 1
-                                        local b = base + C[body + 14] - 1
-                                        S[a] = S[a] - S[b]
-                                        local nxt = body + 28
-                                        if nxt ~= pc then pc = nxt end
-                                    else
-                                        pc = pc + 4
-                                    end
-                                elseif op == 118 then
+                            if op < 134 then
+                                if op == 118 then
                                     local r = base + C[pc + 1] - 1
                                     local step = S[r + 2]
                                     local limit = S[r + 1]
@@ -1231,71 +1240,71 @@ run_closure = function(fn, trace, ...)
                                         S[top] = f
                                         pc = pc + 4
                                     end
+                                elseif op == 133 then
+                                    local r = base + C[pc + 1] - 1
+                                    local f = S[r]
+                                    if f == ipairs_iter then
+                                        local idx = S[r + 2] + 1
+                                        local val = S[r + 1][idx]
+                                        if val ~= nil then
+                                            S[r + 2] = idx
+                                            if C[pc + 2] == 0 then
+                                                S[r + 3] = idx
+                                            else
+                                                S[r + 3] = { v = idx }
+                                            end
+                                            pc = pc + 48
+                                        else
+                                            pc = C[pc + 45]
+                                        end
+                                    elseif f == next then
+                                        local k = next(S[r + 1], S[r + 2])
+                                        if k ~= nil then
+                                            S[r + 2] = k
+                                            if C[pc + 2] == 0 then
+                                                S[r + 3] = k
+                                            else
+                                                S[r + 3] = { v = k }
+                                            end
+                                            pc = pc + 48
+                                        else
+                                            pc = C[pc + 45]
+                                        end
+                                    elseif not closure_info[f] and f ~= getfenv and f ~= setfenv then
+                                        local k = f(S[r + 1], S[r + 2])
+                                        if k ~= nil then
+                                            S[r + 2] = k
+                                            if C[pc + 2] == 0 then
+                                                S[r + 3] = k
+                                            else
+                                                S[r + 3] = { v = k }
+                                            end
+                                            pc = pc + 48
+                                        else
+                                            pc = C[pc + 45]
+                                        end
+                                    else
+                                        top = top + 1
+                                        S[top] = f
+                                        pc = pc + 4
+                                    end
                                 else
                                     error("bad fused bytecode", 0)
                                 end
                             else
-                                if op < 135 then
-                                    if op == 133 then
-                                        local r = base + C[pc + 1] - 1
-                                        local f = S[r]
-                                        if f == ipairs_iter then
-                                            local idx = S[r + 2] + 1
-                                            local val = S[r + 1][idx]
-                                            if val ~= nil then
-                                                S[r + 2] = idx
-                                                if C[pc + 2] == 0 then
-                                                    S[r + 3] = idx
-                                                else
-                                                    S[r + 3] = { v = idx }
-                                                end
-                                                pc = pc + 48
-                                            else
-                                                pc = C[pc + 45]
-                                            end
-                                        elseif f == next then
-                                            local k = next(S[r + 1], S[r + 2])
-                                            if k ~= nil then
-                                                S[r + 2] = k
-                                                if C[pc + 2] == 0 then
-                                                    S[r + 3] = k
-                                                else
-                                                    S[r + 3] = { v = k }
-                                                end
-                                                pc = pc + 48
-                                            else
-                                                pc = C[pc + 45]
-                                            end
-                                        elseif not closure_info[f] and f ~= getfenv and f ~= setfenv then
-                                            local k = f(S[r + 1], S[r + 2])
-                                            if k ~= nil then
-                                                S[r + 2] = k
-                                                if C[pc + 2] == 0 then
-                                                    S[r + 3] = k
-                                                else
-                                                    S[r + 3] = { v = k }
-                                                end
-                                                pc = pc + 48
-                                            else
-                                                pc = C[pc + 45]
-                                            end
-                                        else
-                                            top = top + 1
-                                            S[top] = f
-                                            pc = pc + 4
-                                        end
-                                    elseif op == 134 then
+                                if op < 136 then
+                                    if op == 134 then
                                         S[base + C[pc + 1] - 1] = {}
                                         pc = pc + 8
+                                    elseif op == 135 then
+                                        local t = S[base + C[pc + 1] - 1]
+                                        t[C[pc + 2]] = S[base + C[pc + 3] - 1]
+                                        pc = pc + 12
                                     else
                                         error("bad fused bytecode", 0)
                                     end
                                 else
-                                    if op == 135 then
-                                        local t = S[base + C[pc + 1] - 1]
-                                        t[C[pc + 2]] = S[base + C[pc + 3] - 1]
-                                        pc = pc + 12
-                                    elseif op == 136 then
+                                    if op == 136 then
                                         local t = S[base + C[pc + 1] - 1]
                                         t[C[pc + 2]] = K[C[pc + 3]]
                                         pc = pc + 12
@@ -1303,6 +1312,16 @@ run_closure = function(fn, trace, ...)
                                         local t = S[base + C[pc + 1] - 1]
                                         t[C[pc + 2]] = S[base + C[pc + 3] - 1] + K[C[pc + 9]]
                                         pc = pc + 20
+                                    elseif op == 138 then
+                                        local t = { [K[C[pc + 1]]] = S[base + C[pc + 2] - 1] }
+                                        if C[pc + 3] > 0 then
+                                            S[base + C[pc + 3] - 1] = t
+                                            pc = pc + 24
+                                        else
+                                            top = top + 1
+                                            S[top] = t
+                                            pc = pc + 20
+                                        end
                                     else
                                         error("bad fused bytecode", 0)
                                     end
@@ -1312,21 +1331,11 @@ run_closure = function(fn, trace, ...)
                     end
                 end
             else
-                if op < 169 then
-                    if op < 153 then
-                        if op < 145 then
-                            if op < 141 then
-                                if op == 138 then
-                                    local t = { [K[C[pc + 1]]] = S[base + C[pc + 2] - 1] }
-                                    if C[pc + 3] > 0 then
-                                        S[base + C[pc + 3] - 1] = t
-                                        pc = pc + 24
-                                    else
-                                        top = top + 1
-                                        S[top] = t
-                                        pc = pc + 20
-                                    end
-                                elseif op == 139 then
+                if op < 170 then
+                    if op < 154 then
+                        if op < 146 then
+                            if op < 142 then
+                                if op == 139 then
                                     local t = { [K[C[pc + 1]]] = K[C[pc + 2]] }
                                     if C[pc + 3] > 0 then
                                         S[base + C[pc + 3] - 1] = t
@@ -1341,11 +1350,7 @@ run_closure = function(fn, trace, ...)
                                     local k = S[base + C[pc + 2] - 1]
                                     t[k] = { [K[C[pc + 25]]] = S[base + C[pc + 3] - 1] }
                                     pc = pc + 40
-                                else
-                                    error("bad fused bytecode", 0)
-                                end
-                            else
-                                if op == 141 then
+                                elseif op == 141 then
                                     local v = S[base + C[pc + 2] - 1]
                                     local t = {
                                         v,
@@ -1361,7 +1366,11 @@ run_closure = function(fn, trace, ...)
                                         S[base + C[pc + 1] - 1] = t
                                         pc = pc + 72
                                     end
-                                elseif op == 142 then
+                                else
+                                    error("bad fused bytecode", 0)
+                                end
+                            else
+                                if op == 142 then
                                     local v = S[base + C[pc + 1] - 1] % S[base + C[pc + 2] - 1]
                                     if v == K[C[pc + 3]] then
                                         pc = pc + 24
@@ -1451,13 +1460,7 @@ run_closure = function(fn, trace, ...)
                                 elseif op == 144 then
                                     S[base + C[pc + 1] - 1] = (C[pc + 2] == 1)
                                     pc = pc + 8
-                                else
-                                    error("bad fused bytecode", 0)
-                                end
-                            end
-                        else
-                            if op < 148 then
-                                if op == 145 then
+                                elseif op == 145 then
                                     local r = base + C[pc + 1] - 1
                                     local step = S[r + 2]
                                     local limit = S[r + 1]
@@ -1478,7 +1481,13 @@ run_closure = function(fn, trace, ...)
                                     else
                                         pc = pc + 4
                                     end
-                                elseif op == 146 then
+                                else
+                                    error("bad fused bytecode", 0)
+                                end
+                            end
+                        else
+                            if op < 149 then
+                                if op == 146 then
                                     local r = base + C[pc + 1] - 1
                                     local step = S[r + 2]
                                     local limit = S[r + 1]
@@ -1515,15 +1524,33 @@ run_closure = function(fn, trace, ...)
                                         S[top] = v
                                         pc = C[pc + 3]
                                     end
+                                elseif op == 148 then
+                                    local cop = C[pc + 4]
+                                    local a = S[base + C[pc + 1] - 1]
+                                    local b = K[C[pc + 2]]
+                                    local v
+                                    if cop == 25 then v = cmp_lt(a, b)
+                                    elseif cop == 26 then v = cmp_le(a, b)
+                                    elseif cop == 27 then v = cmp_gt(a, b)
+                                    elseif cop == 28 then v = cmp_ge(a, b)
+                                    elseif cop == 23 then v = a == b
+                                    else v = a ~= b end
+                                    if v then
+                                        pc = pc + 16
+                                    else
+                                        top = top + 1
+                                        S[top] = v
+                                        pc = C[pc + 3]
+                                    end
                                 else
                                     error("bad fused bytecode", 0)
                                 end
                             else
-                                if op < 150 then
-                                    if op == 148 then
+                                if op < 151 then
+                                    if op == 149 then
                                         local cop = C[pc + 4]
                                         local a = S[base + C[pc + 1] - 1]
-                                        local b = K[C[pc + 2]]
+                                        local b = S[base + C[pc + 2] - 1]
                                         local v
                                         if cop == 25 then v = cmp_lt(a, b)
                                         elseif cop == 26 then v = cmp_le(a, b)
@@ -1532,16 +1559,16 @@ run_closure = function(fn, trace, ...)
                                         elseif cop == 23 then v = a == b
                                         else v = a ~= b end
                                         if v then
-                                            pc = pc + 16
-                                        else
                                             top = top + 1
                                             S[top] = v
                                             pc = C[pc + 3]
+                                        else
+                                            pc = pc + 16
                                         end
-                                    elseif op == 149 then
+                                    elseif op == 150 then
                                         local cop = C[pc + 4]
                                         local a = S[base + C[pc + 1] - 1]
-                                        local b = S[base + C[pc + 2] - 1]
+                                        local b = K[C[pc + 2]]
                                         local v
                                         if cop == 25 then v = cmp_lt(a, b)
                                         elseif cop == 26 then v = cmp_le(a, b)
@@ -1560,25 +1587,7 @@ run_closure = function(fn, trace, ...)
                                         error("bad fused bytecode", 0)
                                     end
                                 else
-                                    if op == 150 then
-                                        local cop = C[pc + 4]
-                                        local a = S[base + C[pc + 1] - 1]
-                                        local b = K[C[pc + 2]]
-                                        local v
-                                        if cop == 25 then v = cmp_lt(a, b)
-                                        elseif cop == 26 then v = cmp_le(a, b)
-                                        elseif cop == 27 then v = cmp_gt(a, b)
-                                        elseif cop == 28 then v = cmp_ge(a, b)
-                                        elseif cop == 23 then v = a == b
-                                        else v = a ~= b end
-                                        if v then
-                                            top = top + 1
-                                            S[top] = v
-                                            pc = C[pc + 3]
-                                        else
-                                            pc = pc + 16
-                                        end
-                                    elseif op == 151 then
+                                    if op == 151 then
                                         local cop = C[pc + 4]
                                         local a = S[base + C[pc + 1] - 1]
                                         local b = S[base + C[pc + 2] - 1]
@@ -1610,6 +1619,24 @@ run_closure = function(fn, trace, ...)
                                         else
                                             pc = pc + 16
                                         end
+                                    elseif op == 153 then
+                                        local cop = C[pc + 4]
+                                        local a = S[top]
+                                        S[top] = nil
+                                        top = top - 1
+                                        local b = K[C[pc + 1]]
+                                        local v
+                                        if cop == 25 then v = cmp_lt(a, b)
+                                        elseif cop == 26 then v = cmp_le(a, b)
+                                        elseif cop == 27 then v = cmp_gt(a, b)
+                                        elseif cop == 28 then v = cmp_ge(a, b)
+                                        elseif cop == 23 then v = a == b
+                                        else v = a ~= b end
+                                        if not v then
+                                            pc = C[pc + 2]
+                                        else
+                                            pc = pc + 12
+                                        end
                                     else
                                         error("bad fused bytecode", 0)
                                     end
@@ -1617,27 +1644,9 @@ run_closure = function(fn, trace, ...)
                             end
                         end
                     else
-                        if op < 160 then
-                            if op < 156 then
-                                if op == 153 then
-                                    local cop = C[pc + 4]
-                                    local a = S[top]
-                                    S[top] = nil
-                                    top = top - 1
-                                    local b = K[C[pc + 1]]
-                                    local v
-                                    if cop == 25 then v = cmp_lt(a, b)
-                                    elseif cop == 26 then v = cmp_le(a, b)
-                                    elseif cop == 27 then v = cmp_gt(a, b)
-                                    elseif cop == 28 then v = cmp_ge(a, b)
-                                    elseif cop == 23 then v = a == b
-                                    else v = a ~= b end
-                                    if not v then
-                                        pc = C[pc + 2]
-                                    else
-                                        pc = pc + 12
-                                    end
-                                elseif op == 154 then
+                        if op < 161 then
+                            if op < 157 then
+                                if op == 154 then
                                     local a = base + C[pc + 1] - 1
                                     local b = S[base + C[pc + 2] - 1]
                                     local v = S[a]
@@ -1665,11 +1674,7 @@ run_closure = function(fn, trace, ...)
                                     else v = v .. b end
                                     S[a] = v
                                     pc = pc + 16
-                                else
-                                    error("bad fused bytecode", 0)
-                                end
-                            else
-                                if op == 156 then
+                                elseif op == 156 then
                                     local a = base + C[pc + 1] - 1
                                     local b = S[base + C[pc + 2] - 1][S[base + C[pc + 3] - 1]]
                                     local v = S[a]
@@ -1683,7 +1688,11 @@ run_closure = function(fn, trace, ...)
                                     else v = v .. b end
                                     S[a] = v
                                     pc = pc + 24
-                                elseif op == 157 then
+                                else
+                                    error("bad fused bytecode", 0)
+                                end
+                            else
+                                if op == 157 then
                                     local a = base + C[pc + 1] - 1
                                     local b = base + C[pc + 2] - 1
                                     local t = S[a]
@@ -1700,13 +1709,7 @@ run_closure = function(fn, trace, ...)
                                     local k = S[base + C[pc + 2] - 1] % K[C[pc + 3]]
                                     t[k] = S[base + C[pc + 4] - 1]
                                     pc = pc + 32
-                                else
-                                    error("bad fused bytecode", 0)
-                                end
-                            end
-                        else
-                            if op < 164 then
-                                if op == 160 then
+                                elseif op == 160 then
                                     local cellreg = base + C[pc + 1] - 1
                                     local cp = p.protos[C[pc + 4]]
                                     local ud = cp.updesc
@@ -1738,7 +1741,13 @@ run_closure = function(fn, trace, ...)
                                     end
                                     S[base + C[pc + 3] - 1] = make_closure(cp, ups, e, false)
                                     pc = pc + 20
-                                elseif op == 161 then
+                                else
+                                    error("bad fused bytecode", 0)
+                                end
+                            end
+                        else
+                            if op < 165 then
+                                if op == 161 then
                                     local cellreg = base + C[pc + 1] - 1
                                     local cp = p.protos[C[pc + 4]]
                                     local ud = cp.updesc
@@ -1833,27 +1842,38 @@ run_closure = function(fn, trace, ...)
                                     else
                                         pc = pc + 4
                                     end
+                                elseif op == 164 then
+                                    local kind = C[pc + 4]
+                                    local x = K[C[pc + 1]]
+                                    local y = S[base + C[pc + 2] - 1]
+                                    top = top + 1
+                                    if kind == 13 then S[top] = x + y                elseif kind == 14 then S[top] = x - y
+                                    elseif kind == 15 then S[top] = x * y
+                                    elseif kind == 16 then S[top] = x / y
+                                    elseif kind == 17 then S[top] = x % y
+                                    elseif kind == 18 then S[top] = x ^ y
+                                    else S[top] = x .. y end
+                                    pc = pc + 12
                                 else
                                     error("bad fused bytecode", 0)
                                 end
                             else
-                                if op < 166 then
-                                    if op == 164 then
+                                if op < 167 then
+                                    if op == 165 then
                                         local kind = C[pc + 4]
-                                        local x = K[C[pc + 1]]
-                                        local y = S[base + C[pc + 2] - 1]
-                                        top = top + 1
+                                        local x = S[top]
+                                        local y = S[base + C[pc + 1] - 1]
                                         if kind == 13 then S[top] = x + y                elseif kind == 14 then S[top] = x - y
                                         elseif kind == 15 then S[top] = x * y
                                         elseif kind == 16 then S[top] = x / y
                                         elseif kind == 17 then S[top] = x % y
                                         elseif kind == 18 then S[top] = x ^ y
                                         else S[top] = x .. y end
-                                        pc = pc + 12
-                                    elseif op == 165 then
+                                        pc = pc + 8
+                                    elseif op == 166 then
                                         local kind = C[pc + 4]
                                         local x = S[top]
-                                        local y = S[base + C[pc + 1] - 1]
+                                        local y = K[C[pc + 1]]
                                         if kind == 13 then S[top] = x + y                elseif kind == 14 then S[top] = x - y
                                         elseif kind == 15 then S[top] = x * y
                                         elseif kind == 16 then S[top] = x / y
@@ -1865,18 +1885,7 @@ run_closure = function(fn, trace, ...)
                                         error("bad fused bytecode", 0)
                                     end
                                 else
-                                    if op == 166 then
-                                        local kind = C[pc + 4]
-                                        local x = S[top]
-                                        local y = K[C[pc + 1]]
-                                        if kind == 13 then S[top] = x + y                elseif kind == 14 then S[top] = x - y
-                                        elseif kind == 15 then S[top] = x * y
-                                        elseif kind == 16 then S[top] = x / y
-                                        elseif kind == 17 then S[top] = x % y
-                                        elseif kind == 18 then S[top] = x ^ y
-                                        else S[top] = x .. y end
-                                        pc = pc + 8
-                                    elseif op == 167 then
+                                    if op == 167 then
                                         local kind = C[pc + 4]
                                         local x = S[base + C[pc + 2] - 1]
                                         local y = S[base + C[pc + 3] - 1]
@@ -1902,6 +1911,10 @@ run_closure = function(fn, trace, ...)
                                         elseif kind == 18 then S[d] = x ^ y
                                         else S[d] = x .. y end
                                         pc = pc + 16
+                                    elseif op == 169 then
+                                        local a = S[base + C[pc + 1] - 1]
+                                        local b = S[base + C[pc + 2] - 1]
+                                        if cmp_lt(a, b) then pc = C[pc + 3] else pc = pc + 4 end
                                     else
                                         error("bad fused bytecode", 0)
                                     end
@@ -1910,14 +1923,10 @@ run_closure = function(fn, trace, ...)
                         end
                     end
                 else
-                    if op < 184 then
-                        if op < 176 then
-                            if op < 172 then
-                                if op == 169 then
-                                    local a = S[base + C[pc + 1] - 1]
-                                    local b = S[base + C[pc + 2] - 1]
-                                    if cmp_lt(a, b) then pc = C[pc + 3] else pc = pc + 4 end
-                                elseif op == 170 then
+                    if op < 187 then
+                        if op < 177 then
+                            if op < 173 then
+                                if op == 170 then
                                     local a = S[base + C[pc + 1] - 1]
                                     local b = S[base + C[pc + 2] - 1]
                                     if cmp_le(a, b) then pc = C[pc + 3] else pc = pc + 4 end
@@ -1925,15 +1934,15 @@ run_closure = function(fn, trace, ...)
                                     local a = S[base + C[pc + 1] - 1]
                                     local b = S[base + C[pc + 2] - 1]
                                     if cmp_gt(a, b) then pc = C[pc + 3] else pc = pc + 4 end
+                                elseif op == 172 then
+                                    local a = S[base + C[pc + 1] - 1]
+                                    local b = S[base + C[pc + 2] - 1]
+                                    if cmp_ge(a, b) then pc = C[pc + 3] else pc = pc + 4 end
                                 else
                                     error("bad fused bytecode", 0)
                                 end
                             else
-                                if op == 172 then
-                                    local a = S[base + C[pc + 1] - 1]
-                                    local b = S[base + C[pc + 2] - 1]
-                                    if cmp_ge(a, b) then pc = C[pc + 3] else pc = pc + 4 end
-                                elseif op == 173 then
+                                if op == 173 then
                                     local a = S[base + C[pc + 1] - 1]
                                     local b = S[base + C[pc + 2] - 1]
                                     if a == b then pc = C[pc + 3] else pc = pc + 4 end
@@ -1945,17 +1954,17 @@ run_closure = function(fn, trace, ...)
                                     local a = S[base + C[pc + 1] - 1]
                                     local b = K[C[pc + 2]]
                                     if cmp_lt(a, b) then pc = C[pc + 3] else pc = pc + 4 end
+                                elseif op == 176 then
+                                    local a = S[base + C[pc + 1] - 1]
+                                    local b = K[C[pc + 2]]
+                                    if cmp_le(a, b) then pc = C[pc + 3] else pc = pc + 4 end
                                 else
                                     error("bad fused bytecode", 0)
                                 end
                             end
                         else
-                            if op < 179 then
-                                if op == 176 then
-                                    local a = S[base + C[pc + 1] - 1]
-                                    local b = K[C[pc + 2]]
-                                    if cmp_le(a, b) then pc = C[pc + 3] else pc = pc + 4 end
-                                elseif op == 177 then
+                            if op < 180 then
+                                if op == 177 then
                                     local a = S[base + C[pc + 1] - 1]
                                     local b = K[C[pc + 2]]
                                     if cmp_gt(a, b) then pc = C[pc + 3] else pc = pc + 4 end
@@ -1963,24 +1972,20 @@ run_closure = function(fn, trace, ...)
                                     local a = S[base + C[pc + 1] - 1]
                                     local b = K[C[pc + 2]]
                                     if cmp_ge(a, b) then pc = C[pc + 3] else pc = pc + 4 end
+                                elseif op == 179 then
+                                    local a = S[base + C[pc + 1] - 1]
+                                    local b = K[C[pc + 2]]
+                                    if a == b then pc = C[pc + 3] else pc = pc + 4 end
                                 else
                                     error("bad fused bytecode", 0)
                                 end
                             else
-                                if op < 181 then
-                                    if op == 179 then
-                                        local a = S[base + C[pc + 1] - 1]
-                                        local b = K[C[pc + 2]]
-                                        if a == b then pc = C[pc + 3] else pc = pc + 4 end
-                                    elseif op == 180 then
+                                if op < 182 then
+                                    if op == 180 then
                                         local a = S[base + C[pc + 1] - 1]
                                         local b = K[C[pc + 2]]
                                         if a ~= b then pc = C[pc + 3] else pc = pc + 4 end
-                                    else
-                                        error("bad fused bytecode", 0)
-                                    end
-                                else
-                                    if op == 181 then
+                                    elseif op == 181 then
                                         local u = C[pc + 1]
                                         local f = U[u + 4].v
                                         local a = S[base + C[pc + 2] - 1]
@@ -2036,7 +2041,11 @@ run_closure = function(fn, trace, ...)
                                             if nres == 1 then top = top + 1; S[top] = r end
                                             pc = pc + 20
                                         end
-                                    elseif op == 182 then
+                                    else
+                                        error("bad fused bytecode", 0)
+                                    end
+                                else
+                                    if op == 182 then
                                         local u = C[pc + 1]
                                         local f = U[u + 4].v
                                         local a = S[base + C[pc + 2] - 1]
@@ -2145,6 +2154,59 @@ run_closure = function(fn, trace, ...)
                                             if nres == 1 then top = top + 1; S[top] = r end
                                             pc = pc + 20
                                         end
+                                    elseif op == 184 then
+                                        local f = S[base + C[pc + 1] - 1]
+                                        local a = S[base + C[pc + 2] - 1]
+                                        local nres = C[pc + 4]
+                                        local fci = closure_info[f]
+                                        if fci and not fci[1].isvararg then
+                                            local cp = fci[1]
+                                            local fpos = top + 1
+                                            S[fpos] = a
+                                            local cmax = cp.maxreg
+                                            for j = 2, cmax do S[fpos + j - 1] = nil end
+                                            cur.pc = pc + 16
+                                            cur.line = p.lines and p.lines[pc]
+                                            frames[fi] = cur
+                                            local nfree = free_frame_count
+                                            local frame
+                                            if nfree > 0 then
+                                                frame = free_frames[nfree]
+                                                free_frames[nfree] = nil
+                                                free_frame_count = nfree - 1
+                                            else
+                                                frame = {}
+                                            end
+                                            frame.p = cp
+                                            frame.ups = fci
+                                            frame.base = fpos
+                                            frame.pc = 1
+                                            frame.ret_sp = top
+                                            frame.wanted = nres
+                                            frame.va = nil
+                                            frame.env = fci[2]
+                                            frame.cl = f
+                                            frame.line = nil
+                                            cur = frame
+                                            fi = fi + 1
+                                            frames[fi] = cur
+                                            trace.cur = cur
+                                            trace.fi = fi
+                                            p = cp
+                                            C = cp.code
+                                            K = cp.consts
+                                            U = fci
+                                            e = fci[2]
+                                            base = fpos
+                                            maxreg = cmax
+                                            va = nil
+                                            pc = cp.entry or 1
+                                            top = fpos + cmax - 1
+                                        else
+                                            local r = f(a)
+                                            if nres == 1 then top = top + 1; S[top] = r end
+                                            pc = pc + 16
+                                        end
                                     else
                                         error("bad fused bytecode", 0)
                                     end
@@ -2152,62 +2214,9 @@ run_closure = function(fn, trace, ...)
                             end
                         end
                     else
-                        if op < 196 then
-                            if op < 189 then
-                                if op == 184 then
-                                    local f = S[base + C[pc + 1] - 1]
-                                    local a = S[base + C[pc + 2] - 1]
-                                    local nres = C[pc + 4]
-                                    local fci = closure_info[f]
-                                    if fci and not fci[1].isvararg then
-                                        local cp = fci[1]
-                                        local fpos = top + 1
-                                        S[fpos] = a
-                                        local cmax = cp.maxreg
-                                        for j = 2, cmax do S[fpos + j - 1] = nil end
-                                        cur.pc = pc + 16
-                                        cur.line = p.lines and p.lines[pc]
-                                        frames[fi] = cur
-                                        local nfree = free_frame_count
-                                        local frame
-                                        if nfree > 0 then
-                                            frame = free_frames[nfree]
-                                            free_frames[nfree] = nil
-                                            free_frame_count = nfree - 1
-                                        else
-                                            frame = {}
-                                        end
-                                        frame.p = cp
-                                        frame.ups = fci
-                                        frame.base = fpos
-                                        frame.pc = 1
-                                        frame.ret_sp = top
-                                        frame.wanted = nres
-                                        frame.va = nil
-                                        frame.env = fci[2]
-                                        frame.cl = f
-                                        frame.line = nil
-                                        cur = frame
-                                        fi = fi + 1
-                                        frames[fi] = cur
-                                        trace.cur = cur
-                                        trace.fi = fi
-                                        p = cp
-                                        C = cp.code
-                                        K = cp.consts
-                                        U = fci
-                                        e = fci[2]
-                                        base = fpos
-                                        maxreg = cmax
-                                        va = nil
-                                        pc = cp.entry or 1
-                                        top = fpos + cmax - 1
-                                    else
-                                        local r = f(a)
-                                        if nres == 1 then top = top + 1; S[top] = r end
-                                        pc = pc + 16
-                                    end
-                                elseif op == 187 then
+                        if op < 198 then
+                            if op < 190 then
+                                if op == 187 then
                                     top = top + 1
                                     S[top] = S[base + C[pc + 1] - 1] + S[base + C[pc + 2] - 1] + K[C[pc + 3]]
                                     pc = pc + 20
@@ -2218,15 +2227,15 @@ run_closure = function(fn, trace, ...)
                                     top = top - 1
                                     S[top] = (a * b) / K[C[pc + 1]]
                                     pc = pc + 12
+                                elseif op == 189 then
+                                    S[top] = S[top] + S[base + C[pc + 1] - 1] + K[C[pc + 2]]
+                                    pc = pc + 16
                                 else
                                     error("bad fused bytecode", 0)
                                 end
                             else
-                                if op < 193 then
-                                    if op == 189 then
-                                        S[top] = S[top] + S[base + C[pc + 1] - 1] + K[C[pc + 2]]
-                                        pc = pc + 16
-                                    elseif op == 190 then
+                                if op < 194 then
+                                    if op == 190 then
                                         local res = S[top - 1] / S[top]
                                         S[top] = nil
                                         S[top - 1] = nil
@@ -2257,11 +2266,7 @@ run_closure = function(fn, trace, ...)
                                         maxreg = p.maxreg
                                         va = cur.va
                                         pc = cur.pc
-                                    else
-                                        error("bad fused bytecode", 0)
-                                    end
-                                else
-                                    if op == 193 then
+                                    elseif op == 193 then
                                         local t = S[base + C[pc + 1] - 1]
                                         local k = S[base + C[pc + 2] - 1]
                                         local xd = C[pc + 4]
@@ -2278,7 +2283,11 @@ run_closure = function(fn, trace, ...)
                                             t[k] = t[k] + v
                                         end
                                         pc = pc + 40
-                                    elseif op == 194 then
+                                    else
+                                        error("bad fused bytecode", 0)
+                                    end
+                                else
+                                    if op == 194 then
                                         local t = S[base + C[pc + 1] - 1]
                                         local k = S[base + C[pc + 2] - 1]
                                         local ad = C[pc + 4]
@@ -2311,21 +2320,21 @@ run_closure = function(fn, trace, ...)
                                         else
                                             pc = pc + 4
                                         end
+                                    elseif op == 196 then
+                                        local dest = base + C[pc + 1] - 1
+                                        local b = S[base + C[pc + 3] - 1]
+                                        local c = S[base + C[pc + 4] - 1]
+                                        local d = S[base + C[pc + 5] - 1]
+                                        S[dest] = K[C[pc + 2]] * b * c + d
+                                        pc = pc + 32
                                     else
                                         error("bad fused bytecode", 0)
                                     end
                                 end
                             end
                         else
-                            if op < 201 then
-                                if op == 196 then
-                                    local dest = base + C[pc + 1] - 1
-                                    local b = S[base + C[pc + 3] - 1]
-                                    local c = S[base + C[pc + 4] - 1]
-                                    local d = S[base + C[pc + 5] - 1]
-                                    S[dest] = K[C[pc + 2]] * b * c + d
-                                    pc = pc + 32
-                                elseif op == 198 then
+                            if op < 202 then
+                                if op == 198 then
                                     local t = S[base + C[pc + 1] - 1]
                                     local k = S[base + C[pc + 2] - 1] + K[C[pc + 3]]
                                     top = top + 1
@@ -2362,19 +2371,19 @@ run_closure = function(fn, trace, ...)
                                     elseif kind == 28 then res = cmp_ge(x, v)
                                     else error("bad compare kind", 0) end
                                     if res then pc = pc + 24 else pc = C[pc + 5] end
+                                elseif op == 201 then
+                                    local dest = base + C[pc + 1] - 1
+                                    local a = S[base + C[pc + 2] - 1]
+                                    local b = S[base + C[pc + 3] - 1]
+                                    local c = S[base + C[pc + 4] - 1]
+                                    S[dest] = (a - b) + c
+                                    pc = pc + 24
                                 else
                                     error("bad fused bytecode", 0)
                                 end
                             else
-                                if op < 203 then
-                                    if op == 201 then
-                                        local dest = base + C[pc + 1] - 1
-                                        local a = S[base + C[pc + 2] - 1]
-                                        local b = S[base + C[pc + 3] - 1]
-                                        local c = S[base + C[pc + 4] - 1]
-                                        S[dest] = (a - b) + c
-                                        pc = pc + 24
-                                    elseif op == 202 then
+                                if op < 204 then
+                                    if op == 202 then
                                         local x = S[base + C[pc + 1] - 1] + S[base + C[pc + 2] - 1]
                                         local v = K[C[pc + 3]]
                                         local kind = C[pc + 4]
@@ -2387,18 +2396,18 @@ run_closure = function(fn, trace, ...)
                                         elseif kind == 28 then res = cmp_ge(x, v)
                                         else error("bad compare kind", 0) end
                                         if res then pc = pc + 24 else pc = C[pc + 5] end
-                                    else
-                                        error("bad fused bytecode", 0)
-                                    end
-                                else
-                                    if op == 203 then
+                                    elseif op == 203 then
                                         local t = S[base + C[pc + 1] - 1]
                                         local k1 = S[base + C[pc + 2] - 1]
                                         local k2 = S[base + C[pc + 3] - 1]
                                         top = top + 1
                                         S[top] = t[k1][k2]
                                         pc = pc + 20
-                                    elseif op == 204 then
+                                    else
+                                        error("bad fused bytecode", 0)
+                                    end
+                                else
+                                    if op == 204 then
                                         local a = S[top]
                                         local b = S[top - 1]
                                         local c = S[top - 2]
@@ -2478,6 +2487,30 @@ run_closure = function(fn, trace, ...)
                                             local r = f(a, b)
                                             if nres == 1 then top = top + 1; S[top] = r end
                                             pc = pc + 40
+                                        end
+                                    elseif op == 206 then
+                                        local denom = S[top]
+                                        local num = S[top - 1]
+                                        local q = num / denom
+                                        local v = S[top - 2]
+                                        local t = S[top - 3]
+                                        S[top] = nil
+                                        S[top - 1] = nil
+                                        S[top - 2] = nil
+                                        S[top - 3] = nil
+                                        S[base + C[pc + 1] - 1] = t + v * q
+                                        top = top - 4
+                                        local r = base + C[pc + 2] - 1
+                                        local step = S[r + 2]
+                                        local limit = S[r + 1]
+                                        local idx = S[r] + step
+                                        if (step > 0 and idx <= limit) or
+                                           (step < 0 and idx >= limit) then
+                                            S[r] = idx
+                                            S[base + C[pc + 3] - 1] = idx
+                                            pc = C[pc + 4]
+                                        else
+                                            pc = pc + 20
                                         end
                                     else
                                         error("bad fused bytecode", 0)
@@ -3698,6 +3731,7 @@ local function custom_loadstring(source, env, opts)
                 nextreg = 0, maxreg = 0,
                 isvararg = isvararg, numparams = numparams,
                 loop_depth = 0, loop_breaks = {},
+                has_inline = false,
             }
         end
 
@@ -3793,6 +3827,7 @@ local function custom_loadstring(source, env, opts)
                 captured = false,
                 cell_pc = nil,
                 access = {},
+                func_idx = nil,
                 fc = fc,
             }
             fc.nlocals = fc.nlocals + 1
@@ -3818,6 +3853,7 @@ local function custom_loadstring(source, env, opts)
         end
 
         local function emit_local_set(desc)
+            desc.func_idx = nil
             local p
             if desc.captured then
                 p = emit(SETCELL, desc.slot, 0, 0)
@@ -3855,14 +3891,18 @@ local function custom_loadstring(source, env, opts)
             local d = find_local(parent, name)
             if d then
                 mark_captured(d)
-                return add_upval(f, name, 1, d.slot)
+                local ui = add_upval(f, name, 1, d.slot)
+                f.upvals[ui].src = d
+                return ui
             end
             local ui = find_upval(parent, name)
             if not ui then
                 ui = resolve_upvalue(parent, name)
             end
             if ui then
-                return add_upval(f, name, 0, ui)
+                local nui = add_upval(f, name, 0, ui)
+                f.upvals[nui].src = parent.upvals[ui].src
+                return nui
             end
             return nil
         end
@@ -3903,6 +3943,7 @@ local function custom_loadstring(source, env, opts)
 
         local top_multi = false
         local last_multi_pc = nil
+        local no_tail_call = false
 
         local compile_expr
         local compile_table
@@ -4789,6 +4830,19 @@ local function custom_loadstring(source, env, opts)
                 end
             end
 
+            -- `acc = acc + v * (a / b)` at the end of a numeric for.
+            for pc = 1, n, 4 do
+                if not dead[pc] and pc + 4 <= n and
+                   co[pc] == DIV and
+                   not dead[pc + 4] and
+                   co[pc + 4] == FOP.MUL_ADD_SETLOCAL_FORLOOP and
+                   no_targets(pc, 5) then
+                    put(pc, FOP.DIV_MUL_ADD_SETLOCAL_FORLOOP,
+                        co[pc + 5], co[pc + 6], co[pc + 7], 5)
+                    co[pc + 4] = co[pc + 8]
+                end
+            end
+
             -- `dest = (a - b) + c`: SUB_RR + PUSH_OP_RS(ADD) + SETLOCAL.
             for pc = 1, n, 4 do
                 if not dead[pc] and pc + 20 <= n and
@@ -5141,6 +5195,7 @@ local function custom_loadstring(source, env, opts)
             end
 
             local callpc = emit(CALLD, mreg, 1, 0)
+            if no_tail_call then fc.code[callpc + 3] = 2 end
             fc.nextreg = oldreg
             set_multi(callpc)
             return callpc
@@ -5180,6 +5235,125 @@ local function custom_loadstring(source, env, opts)
             end
         end
 
+        local function function_proto(kind, ref)
+            local idx
+            if kind == "local" then
+                idx = ref.func_idx
+            elseif kind == "upval" then
+                local u = fc.upvals[ref]
+                idx = u and u.src and u.src.func_idx
+            end
+            if not idx then return nil end
+            return all_protos[idx]
+        end
+
+        local function callable_proto(kind, ref)
+            local p = function_proto(kind, ref)
+            if p and p.simple then return p end
+            return nil
+        end
+
+        local function try_inline_call(proto)
+            local sp, stk, stv, stp, slt = pos, tk, tv, tp, last_tp
+            local function restore()
+                pos, tk, tv, tp, last_tp = sp, stk, stv, stp, slt
+            end
+            if tk ~= "(" then return false end
+            advance()
+            local args = {}
+            if tk ~= ")" then
+                while true do
+                    if tk == "name" then
+                        local name = tv
+                        advance()
+                        local d = find_local(fc, name)
+                        if not d then
+                            restore()
+                            return false
+                        end
+                        args[#args + 1] = { kind = "local", desc = d }
+                    elseif tk == "number" or tk == "string" then
+                        args[#args + 1] = { kind = "const", value = tv }
+                        advance()
+                    else
+                        restore()
+                        return false
+                    end
+                    if tk == "," then
+                        advance()
+                    elseif tk == ")" then
+                        break
+                    else
+                        restore()
+                        return false
+                    end
+                end
+            end
+            if tk ~= ")" then
+                restore()
+                return false
+            end
+            advance()
+            if #args ~= proto.numparams then
+                restore()
+                return false
+            end
+
+            for p = 1, proto.rawncode - 11, 4 do
+                local op = proto.rawcode[p]
+                if op == NOP then
+                elseif op == GETLOCAL then
+                    local a = proto.rawcode[p + 1]
+                    if a < 1 or a > proto.numparams then
+                        restore()
+                        return false
+                    end
+                elseif op == LOADK or op == LOADBOOL or op == LOADNIL then
+                    if op == LOADBOOL and proto.rawcode[p + 3] ~= 0 then
+                        restore()
+                        return false
+                    end
+                elseif (op >= ADD and op <= POW) or
+                       op == UNM or op == NOT or op == LEN then
+                else
+                    restore()
+                    return false
+                end
+            end
+
+            local function ins(op, a, b, c, line)
+                local pc = emit(op, a, b, c)
+                if line then fc.lines[pc] = line end
+                return pc
+            end
+
+            for p = 1, proto.rawncode - 11, 4 do
+                local op = proto.rawcode[p]
+                local line = proto.lines and proto.lines[p]
+                if op == NOP then
+                elseif op == GETLOCAL then
+                    local arg = args[proto.rawcode[p + 1]]
+                    if arg.kind == "local" then
+                        local pc = emit_local_get(arg.desc)
+                        if line then fc.lines[pc] = line end
+                    else
+                        ins(LOADK, addk(arg.value), 0, 0, line)
+                    end
+                elseif op == LOADK then
+                    ins(LOADK, addk(proto.consts[proto.rawcode[p + 1]]), 0, 0, line)
+                elseif op == LOADBOOL then
+                    ins(LOADBOOL, proto.rawcode[p + 1], 0, 0, line)
+                elseif op == LOADNIL then
+                    ins(LOADNIL, proto.rawcode[p + 1], 0, 0, line)
+                else
+                    ins(op, 0, 0, 0, line)
+                end
+            end
+            clear_multi()
+            fc.has_inline = true
+            return true
+        end
+
         local function compile_primary()
             if tk == "number" or tk == "string" then
                 local k = addk(tv)
@@ -5217,8 +5391,17 @@ local function custom_loadstring(source, env, opts)
                 local name = tv
                 advance()
                 local kind, ref = resolve_var(name)
-                emit_var_get(kind, ref)
-                compile_suffix()
+                local p = function_proto(kind, ref)
+                local proto = p and p.simple and p or nil
+                if tk == "(" and proto and try_inline_call(proto) then
+                    compile_suffix()
+                else
+                    local save_no_tail = no_tail_call
+                    if p and p.has_inline then no_tail_call = true end
+                    emit_var_get(kind, ref)
+                    compile_suffix()
+                    no_tail_call = save_no_tail
+                end
             elseif tk == "(" then
                 advance()
                 compile_expr()
@@ -5520,9 +5703,48 @@ local function custom_loadstring(source, env, opts)
             parse_block("end")
             expect("end")
             emit(RET, 0, 0, 0)
+            local rawncode = child.ncode
+            local rawcode = {}
+            for i = 1, rawncode do
+                rawcode[i] = child.code[i]
+            end
             optimize_code(child.code, child.ncode)
             if child.ncode > limits.maxCodeSlots then
                 error("code exceeds maxCodeSlots", 0)
+            end
+
+            -- A leaf that can be expanded at a caller's call site: no
+            -- upvalues, no locals/cells, no branches or calls, and a single
+            -- arithmetic `return expr`.
+            local simple = false
+            if not child.isvararg and #child.upvals == 0 and rawncode >= 12 then
+                local lastret = rawncode - 3
+                local prevret = rawncode - 7
+                if rawcode[lastret] == RET and rawcode[lastret + 1] == 0 and
+                   rawcode[prevret] == RET and rawcode[prevret + 1] == 1 then
+                    simple = true
+                    for p = 1, rawncode - 11, 4 do
+                        local op = rawcode[p]
+                        if op == NOP then
+                        elseif op == GETLOCAL then
+                            if rawcode[p + 1] < 1 or
+                               rawcode[p + 1] > child.numparams then
+                                simple = false
+                                break
+                            end
+                        elseif op == LOADK or op == LOADBOOL or op == LOADNIL then
+                            if op == LOADBOOL and rawcode[p + 3] ~= 0 then
+                                simple = false
+                                break
+                            end
+                        elseif (op >= ADD and op <= POW) or
+                               op == UNM or op == NOT or op == LEN then
+                        else
+                            simple = false
+                            break
+                        end
+                    end
+                end
             end
 
             -- Leading NOPs are `emit_cell` placeholders for parameters and
@@ -5542,6 +5764,10 @@ local function custom_loadstring(source, env, opts)
                 isvararg = child.isvararg,
                 maxreg = child.maxreg,
                 entry = entry,
+                rawcode = rawcode,
+                rawncode = rawncode,
+                simple = simple,
+                has_inline = child.has_inline,
                 env = env,
                 sourceName = sourceName,
                 protos = all_protos,
@@ -5694,6 +5920,8 @@ local function custom_loadstring(source, env, opts)
             if k == "local" then
                 emit_local_set(target.ref)
             elseif k == "upval" then
+                local u = fc.upvals[target.ref]
+                if u and u.src then u.src.func_idx = nil end
                 emit(SETUPVAL, target.ref, 0, 0)
             elseif k == "global" then
                 emit(SETGLOBAL, target.ref, 0, 0)
@@ -5770,6 +5998,7 @@ local function custom_loadstring(source, env, opts)
                 local idx = compile_funcbody(false)
                 emit(CLOSURE, idx, 0, 0)
                 emit_local_set(desc)
+                desc.func_idx = idx
                 clear_multi()
                 return
             end
@@ -5815,10 +6044,12 @@ local function custom_loadstring(source, env, opts)
                 fail("'end' expected after return")
             end
             if n == -1 and count == 1 and multi_pc and
-               fc.code[multi_pc] == CALLD then
+               fc.code[multi_pc] == CALLD and fc.code[multi_pc + 3] ~= 2 then
                 -- Mark this CALLD as a tail call. The VM reuses the current
                 -- frame for interpreted targets; native targets are called
-                -- normally and fall through to the RET below.
+                -- normally and fall through to the RET below. C = 2 marks a
+                -- call that must keep its frame because the target contains
+                -- inlined code whose errors need a traceback frame.
                 fc.code[multi_pc + 3] = 1
             end
             emit(RET, n, 0, 0)

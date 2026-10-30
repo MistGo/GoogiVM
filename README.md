@@ -46,7 +46,7 @@ Most pure-Lua interpreters (such as **FiOne** / **LBI**) are *bytecode-only* int
 Lua 5.1 Source
   -> Streaming Lexer & Single-Pass Compiler (no AST allocation)
   -> Per-Function Prototype + Line Table
-  -> Linear Peephole Superinstruction Optimizer (Opcodes 52-205)
+  -> Linear Peephole Superinstruction Optimizer (Opcodes 52-206)
   -> Explicit-Frame Stack/Register VM (Balanced Opcode Dispatch Tree, Frame Pooling, Tail-Call Optimization)
 ```
 
@@ -66,7 +66,7 @@ Lua 5.1 Source
   - Guest `pcall`/`xpcall` around interpreted closures keep the same sandbox format: host file paths and internal VM line numbers are never exposed.
 - **Bounded Stack for Tail Calls:**
   - `return f(...)` reuses the current frame **and** its original stack region, so even millions of tail calls stay within a constant `maxStack` footprint.
-- **Superinstruction Peephole Optimizer (124 Fused Opcodes):**
+- **Superinstruction Peephole Optimizer (125 Fused Opcodes + Leaf Inlining):**
   - Fuses local moves, constant loads, binary arithmetic, compound assignments (`s = s + i`, `s = s + t[i]`, `s = (s + i) % k`, `t[i % k] = v`), multiple-assignment swaps (`a, b = b, a`), table reads/writes (`t[k] = v`, `t.field = v`), short-circuit comparisons (`and`/`or`), conditional branches (`if a < b`, `if x % d == 0`), numeric `for` bodies (including `s = s * k`, `s = s % k` and `s = s .. k`), per-iteration closures, table constructors, and `ipairs`/`pairs` generic `for` loops that run the iterator and the loop step inside one dispatch (`TFOR_1`/`TFOR_2`) instead of a dispatch-heavy sequence.
   - Opcode families share a single opcode with a *kind* stored in a dead slot, so the dispatch tree stays small: all twelve comparison branches, all seven compound assignments, and the whole `and`/`or` test family each cost one opcode instead of six to eighteen.
 
@@ -178,11 +178,11 @@ GoogiVM does not ship a second standard library.
 
 Across 50 diverse microbenchmarks comparing **GoogiVM** against upstream **FiOne** (`SovereignSatellite/FiOne` running precompiled `luac5.1` bytecode). Every figure below is the **median of 10 measured iterations per case**, after 3 warm-up iterations, on the same machine:
 
-- **48 wins**, **2 losses**, **no near-ties**.
-- **4.91x faster by total median execution time** (`1.0440 s` vs `5.1267 s`).
-- **2.38x geometric mean speedup** across all 50 workloads.
+- **48 wins**, **no losses**, **2 near-ties** (within 5%).
+- **7.07x faster by total median execution time** (`0.7162 s` vs `5.0665 s`).
+- **2.88x geometric mean speedup** across all 50 workloads.
 
-Ten samples are used instead of three because small samples are outlier-sensitive: a single sample disrupted by the OS scheduler or the garbage collector can move a mean by tens of percent. Median, trimmed mean (fastest and slowest sample dropped) and plain mean agree within a few percent on this sample — `4.91x` / `4.75x` / `4.67x` total, `2.38x` / `2.50x` / `2.55x` geometric mean — so the result is stable. Allocation-bound cases still flip between wins and losses across repeated suite runs; the `-joff` game profile below is the stable target.
+Ten samples are used instead of three because small samples are outlier-sensitive: a single sample disrupted by the OS scheduler or the garbage collector can move a mean by tens of percent. Median, trimmed mean (fastest and slowest sample dropped) and plain mean agree within a few percent on this sample — `7.07x` / `6.58x` / `6.42x` total, `2.88x` / `2.91x` / `2.92x` geometric mean — so the result is stable. Allocation-bound cases still flip between wins and losses across repeated suite runs; the `-joff` game profile below is the stable target.
 
 Absolute seconds move with host load, so they are not comparable across sessions: an earlier session measured the same code roughly 1.5x faster in absolute terms while the ratios stayed within a few percent. The ratio columns are the stable metric.
 
@@ -190,14 +190,14 @@ Per-category median ratios:
 
 | Category | FiOne / GoogiVM | Notes |
 |---|---:|---|
-| Function calls | 5.88x - 8.28x | `calls_simple_1m` 5.88x, `method_call_100k` 8.28x |
-| Closures / upvalues | 1.20x - 10.62x | `closure_upvalue_1m` 10.62x, `closure_loop_capture_100k` 1.20x, `closures_create_100k` 1.44x |
-| Recursion (incl. tail) | 1.39x - 16.00x | `recursion_fact_10` 1.39x, `tail_recursion_1000` 16.00x, `mutual_recursion_1000` 5.46x |
-| `ipairs` / `pairs` / `next` | 1.39x - 3.89x | `generic_next_100k` 1.39x, `generic_ipairs_50k` 3.89x |
-| Metatables | 9.80x | `metatable_add_100k` |
-| Only non-wins | 0.60x - 0.93x | `table_nested_50k` 0.60x, `branch_and_or_100k` 0.93x |
+| Function calls | 7.00x - 101.31x | `method_call_100k` 7.00x, `calls_threearg_500k` 26.41x, `calls_twoarg_1m` 101.31x |
+| Closures / upvalues | 0.98x - 9.33x | `closure_upvalue_1m` 9.33x, `closure_loop_capture_100k` 0.98x, `closures_create_100k` 1.10x |
+| Recursion (incl. tail) | 1.52x - 14.09x | `recursion_fact_10` 1.52x, `tail_recursion_1000` 14.09x, `mutual_recursion_1000` 13.49x |
+| `ipairs` / `pairs` / `next` | 1.53x - 4.00x | `generic_next_100k` 1.53x, `generic_ipairs_50k` 4.00x |
+| Metatables | 10.48x | `metatable_add_100k` |
+| Only non-wins | 0.95x - 0.98x | `branch_and_or_100k` 0.95x, `closure_loop_capture_100k` 0.98x |
 
-The geometric mean of **2.38x** is the honest aggregate: it is dominated by the sub-millisecond cases, which are the noisiest. `table_nested_50k` and `branch_and_or_100k` are a few-dispatch microbenchmarks whose whole measurement is a few milliseconds, so they flip between wins and losses across sessions. The call-, closure- and recursion-heavy cases, which dominate real workloads, are stable wins.
+The geometric mean of **2.88x** is the honest aggregate: it is dominated by the sub-millisecond cases, which are the noisiest. The two non-wins are micro-timing-bound: `branch_and_or_100k` is a five-dispatch loop body and `closure_loop_capture_100k` allocates a fresh cell and closure per iteration; both measurements are a few milliseconds long and flip around parity between sessions. Leaf-function inlining is what lifts the call-heavy cases from single digits to double digits.
 
 See [`BENCHMARK_50.md`](BENCHMARK_50.md) and [`BENCHMARK_50.csv`](BENCHMARK_50.csv) for the per-case breakdown of the same 10-sample median.
 
@@ -237,13 +237,13 @@ Medians of three runs on one machine, seconds:
 | Engine | Total |
 |---|---:|
 | Native PUC Lua 5.1 (reference only) | 0.467 |
-| **GoogiVM, JIT enabled** | **1.639** |
-| **GoogiVM, `-joff` (game profile)** | **4.659** |
+| **GoogiVM, JIT enabled** | **1.415** |
+| **GoogiVM, `-joff` (game profile)** | **4.005** |
 | Upstream FiOne, `-joff` | 7.938 |
 
-Against FiOne that is **4.84x** with the JIT on and **1.70x** with the JIT off. The difference is structural: with the JIT, GoogiVM's dispatch loop becomes machine code; with `-joff` every VM instruction costs a host interpreter dispatch, while FiOne — already a pure interpreter — is unaffected by the flag. This is the honest number for Scrap Mechanic.
+Against FiOne that is **5.61x** with the JIT on and **1.98x** with the JIT off. The difference is structural: with the JIT, GoogiVM's dispatch loop becomes machine code; with `-joff` every VM instruction costs a host interpreter dispatch, while FiOne — already a pure interpreter — is unaffected by the flag. This is the honest number for Scrap Mechanic.
 
-Under `-joff` the suite is **8 wins, 6 losses, 2 ties**: it wins `spectral-norm` 2.56x, `binary-trees` 1.82x, `hanoi` 1.76x, `oop` 1.57x, `jsonencode` 1.43x, `nbody` 1.30x, `matmul` 1.11x and `fasta` 1.05x, ties `queens` (1.00x) and `sieve` (0.99x), and loses `mandelbrot` 0.94x, `quicksort` 0.90x, `pidigits` 0.79x, `k-nucleotide` 0.73x, `wordfreq` 0.67x and `fannkuch-redux` 0.60x. The split is consistent: work that is dominated by calls, tables and allocation favours the fused dispatcher, and tight numeric kernels — where almost every source statement is a single arithmetic instruction — favour the smaller per-instruction cost of a bytecode interpreter. Against the native PUC Lua 5.1 interpreter GoogiVM is about 10.0x slower with the JIT off and about 3.5x slower with the JIT on, which is the expected cost of interpreting Lua bytecode from inside Lua.
+Under `-joff` the suite is **8 wins, 7 losses, 1 tie**: it wins `spectral-norm` 3.96x, `binary-trees` 1.87x, `hanoi` 1.82x, `oop` 1.61x, `jsonencode` 1.45x, `nbody` 1.32x, `matmul` 1.16x and `fasta` 1.05x, ties `sieve` (1.01x), and loses `mandelbrot` 0.95x, `quicksort` 0.91x, `pidigits` 0.79x, `k-nucleotide` 0.70x, `wordfreq` 0.67x, `fannkuch-redux` 0.58x and `queens` 0.90x. The split is consistent: work that is dominated by calls, tables and allocation favours the fused dispatcher, and tight numeric kernels — where almost every source statement is a single arithmetic instruction — favour the smaller per-instruction cost of a bytecode interpreter. Against the native PUC Lua 5.1 interpreter GoogiVM is about 8.6x slower with the JIT off and about 3.0x slower with the JIT on, which is the expected cost of interpreting Lua bytecode from inside Lua.
 
 
 ---
@@ -269,7 +269,8 @@ See [`TECHNICAL.md`](TECHNICAL.md) for a deep dive into the compiler, bytecode f
    - Scans jump targets first so it never fuses across a branch destination.
    - Replaces multi-instruction sequences in place (marking trailing slots dead and advancing `pc` by `4 * len`).
    - Fuses loop control (`FORLOOP_MOV`, `FORLOOP_CELL`) with hot loop bodies (`FORLOOP_ADD_RR/RK`, `FORLOOP_SUB_RR/RK`, `FORLOOP_ASSIGN_RR/RK`, `FORLOOP_ADD_INDEX`, `FORLOOP_SETINDEX_RR/RK`, `FORLOOP_MOD_RR_EQ_K`, `FORLOOP_NEWTABLE_SETINDEX_R`, `FORLOOP_SETTRUE`).
-   - Fuses direct calls (`CALL_U_RR2/RR1`, `CALL_R_RR2/RR1`, `INDEX_ADD_RK_CALL_U_RR2`), arithmetic chains (`ADD_RR_ADD_K`, `MUL_DIV_K`, `ADD_R_ADD_K`, `DIV_RET`, `ASSIGN_MUL3_ADD`, `ASSIGN_SUB_ADD`, `MUL_ADD_SETLOCAL`, `MUL_ADD_SETLOCAL_FORLOOP`), indexed updates (`SETINDEX_MUL3`, `SETINDEX_MUL2`, `INDEX_ADD_RK`, `INDEX_INDEX_RR`), indexed comparisons (`INDEX_CMP_JMPF`, `ADD_JMPF_K`) and loop back-edges (`JMPT_CMP_*`).
+   - Fuses direct calls (`CALL_U_RR2/RR1`, `CALL_R_RR2/RR1`, `INDEX_ADD_RK_CALL_U_RR2`), arithmetic chains (`ADD_RR_ADD_K`, `MUL_DIV_K`, `ADD_R_ADD_K`, `DIV_RET`, `ASSIGN_MUL3_ADD`, `ASSIGN_SUB_ADD`, `MUL_ADD_SETLOCAL`, `MUL_ADD_SETLOCAL_FORLOOP`, `DIV_MUL_ADD_SETLOCAL_FORLOOP`), indexed updates (`SETINDEX_MUL3`, `SETINDEX_MUL2`, `INDEX_ADD_RK`, `INDEX_INDEX_RR`), indexed comparisons (`INDEX_CMP_JMPF`, `ADD_JMPF_K`) and loop back-edges (`JMPT_CMP_*`).
+   - Inlines small leaf functions (no upvalues, no branches or calls, one arithmetic `return`) directly at the call site; the caller keeps a real frame for inlined error tracebacks.
    - Fuses generic `for` loops into `TFOR_1` and `TFOR_2` with direct in-VM `ipairs` and `next` iteration.
 4. **Explicit Call Frames & Frame Pool:**
    - Custom-to-custom function calls (`CALLD`) push a lightweight frame onto `frames[]` (reusing pooled frame tables from `free_frames`) and jump to `pc = proto.entry` inside the same `while true` loop - avoiding host Lua C-stack recursion.
