@@ -242,6 +242,33 @@ for i = 1, 10 do s = s + (a + b) end
 return s
 ]], P(30))
 
+    -- `t[i + k]` fused table read.
+    t:expect([[
+local log = {}
+local t = setmetatable({}, {
+    __index = function(_, k) log[#log + 1] = 'g' .. k; return k * 10 end,
+})
+local s = 0
+for i = 1, 3 do s = s + t[i + 1] end
+return s, table.concat(log, ',')
+]], P(90, "g2,g3,g4"))
+
+    -- `c + b * a` must keep `__mul` / `__add` operand order.
+    t:expect([[
+local log = {}
+local mt = {
+    __mul = function(a, b) log[#log + 1] = 'm' .. a.n .. b.n; return {n = a.n * b.n} end,
+    __add = function(a, b) log[#log + 1] = 'a' .. a.n .. b.n; return {n = a.n + b.n} end,
+}
+local x = setmetatable({n = 2}, mt)
+local y = setmetatable({n = 3}, mt)
+local c = setmetatable({n = 4}, mt)
+local function getx() return x end
+local function gety() return y end
+local r = c + getx() * gety()
+return r.n, table.concat(log, ',')
+]], P(10, "m23,a46"))
+
     -- Fused indexed update must keep `__index` / `__newindex` order.
     t:expect([[
 local log = {}
