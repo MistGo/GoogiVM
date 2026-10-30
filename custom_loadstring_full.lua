@@ -1714,33 +1714,67 @@ run_closure = function(fn, trace, ...)
                             else
                                 if op == 160 then
                                     local cellreg = base + C[pc + 1] - 1
-                                    S[cellreg] = { v = S[base + C[pc + 2] - 1] }
                                     local cp = p.protos[C[pc + 4]]
                                     local ud = cp.updesc
-                                    local ups = { cp, e, false, true }
-                                    for j = 1, #ud do
-                                        local d = ud[j]
-                                        if d.instack == 1 then
-                                            ups[j + 4] = S[base + d.idx - 1]
-                                        else
-                                            ups[j + 4] = U[d.idx + 4]
+                                    local nup = #ud
+                                    local cell
+                                    local d1 = ud[1]
+                                    local merged = nup == 1 and d1.instack == 1 and
+                                                   base + d1.idx - 1 == cellreg
+                                    if merged then
+                                        cell = { v = S[base + C[pc + 2] - 1], cp, e, false, true }
+                                        cell[5] = cell
+                                    else
+                                        cell = { v = S[base + C[pc + 2] - 1] }
+                                    end
+                                    S[cellreg] = cell
+                                    local ups
+                                    if merged then
+                                        ups = cell
+                                    else
+                                        ups = { cp, e, false, true }
+                                        for j = 1, nup do
+                                            local d = ud[j]
+                                            if d.instack == 1 then
+                                                ups[j + 4] = S[base + d.idx - 1]
+                                            else
+                                                ups[j + 4] = U[d.idx + 4]
+                                            end
                                         end
                                     end
                                     S[base + C[pc + 3] - 1] = make_closure(cp, ups, e, false)
                                     pc = pc + 20
                                 elseif op == 161 then
                                     local cellreg = base + C[pc + 1] - 1
-                                    local cell = { v = S[base + C[pc + 2] - 1] }
-                                    S[cellreg] = cell
                                     local cp = p.protos[C[pc + 4]]
                                     local ud = cp.updesc
-                                    local ups = { cp, e, false, true }
-                                    for j = 1, #ud do
-                                        local d = ud[j]
-                                        if d.instack == 1 then
-                                            ups[j + 4] = S[base + d.idx - 1]
-                                        else
-                                            ups[j + 4] = U[d.idx + 4]
+                                    local nup = #ud
+                                    local cell
+                                    local d1 = ud[1]
+                                    local merged = nup == 1 and d1.instack == 1 and
+                                                   base + d1.idx - 1 == cellreg
+                                    if merged then
+                                        -- The whole closure captures nothing but this very cell, so
+                                        -- the closure record can double as the cell: one table
+                                        -- instead of two, and the upvalue slot points back at it.
+                                        cell = { v = S[base + C[pc + 2] - 1], cp, e, false, true }
+                                        cell[5] = cell
+                                    else
+                                        cell = { v = S[base + C[pc + 2] - 1] }
+                                    end
+                                    S[cellreg] = cell
+                                    local ups
+                                    if merged then
+                                        ups = cell
+                                    else
+                                        ups = { cp, e, false, true }
+                                        for j = 1, nup do
+                                            local d = ud[j]
+                                            if d.instack == 1 then
+                                                ups[j + 4] = S[base + d.idx - 1]
+                                            else
+                                                ups[j + 4] = U[d.idx + 4]
+                                            end
                                         end
                                     end
                                     local t = S[base + C[pc + 3] - 1]
