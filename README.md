@@ -221,30 +221,49 @@ luajit benchmarks/median_report.lua run1.csv … run10.csv
 
 It takes the per-case median across runs, reports wins/losses/ties on a 5% tie band, the geometric mean, and writes the aggregated `BENCHMARK_50.md` and `BENCHMARK_50.csv`. Never run two suites at the same time — the CPU contention makes the numbers meaningless.
 
-Note that this suite runs under **LuaJIT with the JIT enabled**. That is the right profile for comparing two interpreters on equal terms, but it is not the profile GoogiVM runs in inside Scrap Mechanic, where the JIT never compiles the VM's own dispatch loop. The suite below measures that second profile.
+Note that this suite runs under **LuaJIT with the JIT enabled**. That is the right profile for comparing two interpreters on equal terms, but it is not the profile GoogiVM runs in inside Scrap Mechanic, where the JIT never compiles the VM's own dispatch loop. The real-world section below reports both the local `-joff` proxy and the actual in-game results.
 
-### Real-world suite (the game profile)
+### Real-world suite (local and in-game)
 
 [`benchmarks/benchreal.lua`](benchmarks/benchreal.lua) runs 16 full workloads adapted from [The Computer Language Benchmarks Game](https://benchmarksgame-team.pages.debian.net/benchmarksgame/) — `nbody`, `spectral-norm`, `mandelbrot`, `binary-trees`, `fannkuch-redux`, `pidigits`, `fasta`, `k-nucleotide`, `sieve`, `queens`, `matmul`, `quicksort`, `wordfreq`, `oop`, `jsonencode`, `hanoi`. These are complete programs rather than microbenchmarks, so they are much closer to what a computer program in a mod actually does. Every case returns a value that is checked against a known expectation, so a wrong result is reported instead of silently timed.
 
+#### Local reference (LuaJIT, one machine)
+
 ```bash
-luajit -joff benchmarks/benchreal.lua      # the in-game profile
-luajit benchmarks/benchreal.lua            # the JIT profile
+luajit -joff benchmarks/benchreal.lua      # local game-profile proxy
+luajit benchmarks/benchreal.lua            # JIT profile
 ```
 
-Medians of three runs on one machine, seconds:
+Medians of three runs, seconds:
 
 | Engine | Total |
 |---|---:|
 | Native PUC Lua 5.1 (reference only) | 0.467 |
 | **GoogiVM, JIT enabled** | **1.351** |
-| **GoogiVM, `-joff` (game profile)** | **3.862** |
+| **GoogiVM, `-joff` (local game-profile proxy)** | **3.862** |
 | Upstream FiOne, `-joff` | 7.938 |
 
-Against FiOne that is **5.88x** with the JIT on and **2.06x** with the JIT off. The difference is structural: with the JIT, GoogiVM's dispatch loop becomes machine code; with `-joff` every VM instruction costs a host interpreter dispatch, while FiOne — already a pure interpreter — is unaffected by the flag. This is the honest number for Scrap Mechanic.
+Against FiOne that is **5.88x** with the JIT on and **2.06x** with the JIT off. The `-joff` figure is a local proxy, not the final game number: with the JIT, GoogiVM's dispatch loop becomes machine code; with `-joff` every VM instruction costs a host interpreter dispatch, while FiOne — already a pure interpreter — is less affected by the flag. The actual in-game result is higher.
 
-Under `-joff` the suite is **8 wins, 5 losses, 3 ties**: it wins `spectral-norm` 4.20x, `hanoi` 1.89x, `binary-trees` 1.88x, `oop` 1.63x, `jsonencode` 1.49x, `nbody` 1.34x, `matmul` 1.18x and `fasta` 1.08x, ties `sieve` (1.01x), `mandelbrot` (1.00x) and `queens` (1.00x), and loses `quicksort` 0.95x, `pidigits` 0.81x, `k-nucleotide` 0.73x, `wordfreq` 0.69x and `fannkuch-redux` 0.61x. The split is consistent: work that is dominated by calls, tables and allocation favours the fused dispatcher, and tight numeric kernels — where almost every source statement is a single arithmetic instruction — favour the smaller per-instruction cost of a bytecode interpreter. Against the native PUC Lua 5.1 interpreter GoogiVM is about 8.3x slower with the JIT off and about 2.9x slower with the JIT on, which is the expected cost of interpreting Lua bytecode from inside Lua.
+#### In-game (Scrap Mechanic, `SCALE=1`)
 
+Measured inside ScrapComputers computers with the same 16-task suite; each VM ran in the same world. Times are seconds.
+
+| Suite | Cases | GoogiVM | ScrapComputers VM | SComputers VM | Googi vs SC | Googi vs S |
+|---|---:|---:|---:|---:|---:|---:|
+| **16 real-world, full** | 16 | **4.063** | 12.096 | —* | **2.98x** | — |
+| **16 real-world, common** | 15 | **3.830** | 11.430 | 9.606 | **2.98x** | **2.51x** |
+| **50 micro, full** | 50 | **2.6849** | 10.1501 | 7.6978** | **3.78x** | **≈2.87x** |
+
+\* SComputers' 16-task log contains 15 tasks because `oop` is missing. If `oop` is estimated at the ScrapComputers time of 0.666 s, the full total is ≈10.27 s and the ratio is ≈2.53x; this is an estimate, not a measurement.
+
+\** SComputers' 50-case run has 49/50 timed: `metatable_add_100k` fails because SComputers' `setmetatable` returns `nil` instead of the table, which is a sandbox limitation rather than a VM bug. On the 49 common cases the ratio is ≈2.94x. The GoogiVM and ScrapComputers 50-case runs used `SAMPLES=2`; SComputers used `SAMPLES=5`.
+
+ScrapComputers' `wordfreq` result was wrong (`20050000` instead of `19050000`); GoogiVM and SComputers returned the expected value.
+
+Against ScrapComputers the 16-task split is **9 wins, 5 losses, 2 ties**: GoogiVM wins `spectral-norm` 6.96x, `hanoi` 3.88x, `oop` 2.86x, `binary-trees` 2.70x, `jsonencode` 2.37x, `fasta` 1.83x, `sieve` 1.29x, `nbody` 1.24x and `matmul` 1.12x; `mandelbrot` (1.02x) and `quicksort` (0.98x) are ties; the remaining five are losses (`fannkuch-redux` 0.72x, `pidigits` 0.75x, `k-nucleotide` 0.70x, `queens` 0.90x, `wordfreq` 0.75x).
+
+The 50-case micro suite is call-heavy: **3.78x** total against ScrapComputers, but the geometric mean is about **1.7x**, and without the three call-heavy cases the ratio is about **1.94x**. The 16-task real-world suite is the headline game number.
 
 ---
 
