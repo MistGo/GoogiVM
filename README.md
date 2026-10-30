@@ -176,28 +176,30 @@ GoogiVM does not ship a second standard library.
 
 ### 50-Case Head-to-Head Suite (`BENCHMARK_50.md`)
 
-Across 50 diverse microbenchmarks comparing **GoogiVM** against upstream **FiOne** (`SovereignSatellite/FiOne` running precompiled `luac5.1` bytecode). The figures below are the mean of **three consecutive full runs** of the suite on the same machine:
+Across 50 diverse microbenchmarks comparing **GoogiVM** against upstream **FiOne** (`SovereignSatellite/FiOne` running precompiled `luac5.1` bytecode). Every figure below is the **median of 10 consecutive full runs** of the suite on the same machine; each run itself records the median of 7 measured iterations after 3 warm-up iterations:
 
 - **46 wins**, **3 losses**, **1 near-tie** (within 5%).
-- **3.87x faster by total mean execution time** (`1.8357 s` vs `7.1123 s`).
-- **2.14x geometric mean speedup** across all 50 workloads.
+- **4.27x faster by total median execution time** (`1.1443 s` vs `4.8809 s`).
+- **2.27x geometric mean speedup** across all 50 workloads.
+
+Ten runs are used instead of three because small samples are outlier-sensitive: a single run disrupted by the OS scheduler or the garbage collector can move a mean by tens of percent. Median, trimmed mean (fastest and slowest run dropped) and plain mean agree within a few percent on this sample — `4.27x` / `4.23x` / `4.20x` total, `2.27x` / `2.26x` / `2.27x` geometric mean — so the result is stable.
 
 Absolute seconds move with host load, so they are not comparable across sessions: an earlier session measured the same code roughly 1.5x faster in absolute terms while the ratios stayed within a few percent. The ratio columns are the stable metric.
 
-Per-category mean ratios, including the losses:
+Per-category median ratios, including the losses:
 
 | Category | FiOne / GoogiVM | Notes |
 |---|---:|---|
-| Function calls | 4.94x - 5.62x | `calls_threearg_500k` 4.94x, `calls_simple_1m` 5.62x |
-| Closures / upvalues | 0.51x - 6.95x | `closure_upvalue_1m` 6.95x, but `closure_loop_capture_100k` 0.51x and `closures_create_100k` 0.70x |
-| Recursion (incl. tail) | 0.92x - 11.56x | `recursion_fact_10` 0.92x, `mutual_recursion_1000` 11.56x, `tail_recursion_1000` 7.37x |
-| `ipairs` / `pairs` / `next` | 1.52x - 3.85x | `generic_next_100k` 1.52x, `ipairs_100k` 3.85x |
-| Metatables | 7.63x | `metatable_add_100k` |
-| Largest losses | 0.51x - 0.92x | `closure_loop_capture_100k` 0.51x, `closures_create_100k` 0.70x, `recursion_fact_10` 0.92x |
+| Function calls | 5.38x - 6.00x | `calls_threearg_500k` 5.38x, `calls_simple_1m` 6.00x |
+| Closures / upvalues | 0.62x - 8.40x | `closure_upvalue_1m` 8.40x, but `closure_loop_capture_100k` 0.62x and `closures_create_100k` 0.85x |
+| Recursion (incl. tail) | 1.27x - 11.85x | `recursion_fact_10` 1.27x, `tail_recursion_1000` 11.85x, `mutual_recursion_1000` 11.30x |
+| `ipairs` / `pairs` / `next` | 1.55x - 4.06x | `generic_next_100k` 1.55x, `ipairs_100k` 4.06x |
+| Metatables | 8.64x | `metatable_add_100k` |
+| Largest losses | 0.62x - 0.89x | `closure_loop_capture_100k` 0.62x, `closures_create_100k` 0.85x, `branch_and_or_100k` 0.89x |
 
-The geometric mean of **2.14x** is the honest aggregate because the suite still contains real losses. Both closure cases are allocation-bound: every closure costs a native function, a metadata table and a weak-table registration, so the interpreter has little left to fuse.
+The geometric mean of **2.27x** is the honest aggregate because the suite still contains real losses. All three remaining losses involve allocating a fresh closure per iteration — each closure needs a native Lua function, a per-closure record and an entry in a weak-key registry, which is pure allocation cost rather than interpreter dispatch.
 
-See [`BENCHMARK_50.md`](BENCHMARK_50.md) and [`BENCHMARK_50.csv`](BENCHMARK_50.csv) for the per-case breakdown of the same three-run mean.
+See [`BENCHMARK_50.md`](BENCHMARK_50.md) and [`BENCHMARK_50.csv`](BENCHMARK_50.csv) for the per-case breakdown of the same 10-run median.
 
 ### Reproducing the suite
 
@@ -210,6 +212,14 @@ luajit benchmarks/bench50_actual.lua <path-to-FiOne/source.lua> <dir-with-luac5.
 It needs a [FiOne](https://github.com/SovereignSatellite/FiOne) checkout and a Lua 5.1.5 compiler, because FiOne consumes `luac5.1` bytecode. The three arguments can also come from the `FIONE_PATH`, `LUAC_DIR` and `BENCH_DIR` environment variables; the defaults are `./FiOne/source.lua`, the current directory, and `./bench50-work`.
 
 Compilation happens outside the timer, so the numbers are execution time only. The script writes `BENCHMARK_50.md`, `BENCHMARK_50.csv` and an untracked `BENCHMARK_50_raw.csv` with every individual sample to the current directory. A full run takes about two and a half minutes.
+
+A single run is a small sample, so the published figures come from **10 consecutive runs** of that command (rename each `BENCHMARK_50.csv` to `run1.csv` … `run10.csv`), aggregated with [`benchmarks/median_report.lua`](benchmarks/median_report.lua):
+
+```bash
+luajit benchmarks/median_report.lua run1.csv … run10.csv
+```
+
+It takes the per-case median across runs, reports wins/losses/ties on a 5% tie band, the geometric mean, and writes the aggregated `BENCHMARK_50.md` and `BENCHMARK_50.csv`. Never run two suites at the same time — the CPU contention makes the numbers meaningless.
 
 ---
 

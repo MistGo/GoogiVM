@@ -472,7 +472,7 @@ end
 local function make_closure(proto, upvals, fenv, set_native_env)
     local info
     local function closure(...)
-        if info.fast then
+        if info[4] then
             return run_closure(closure, nil, ...)
         end
         local trace = {}
@@ -489,10 +489,11 @@ local function make_closure(proto, upvals, fenv, set_native_env)
     if set_native_env and setfenv then
         native_env = pcall(setfenv, closure, env)
     end
-    info = {
-        p = proto, u = upvals, env = env, fenv = native_env,
-        limits = proto.limits, fast = not set_native_env,
-    }
+    info = upvals
+    info[1] = proto
+    info[2] = env
+    info[3] = native_env
+    info[4] = not set_native_env
     closure_info[closure] = info
     return closure
 end
@@ -502,10 +503,10 @@ local function get_closure_env(fn)
     if not info then
         return nil
     end
-    if info.fenv and getfenv then
+    if info[3] and getfenv then
         return getfenv(fn)
     end
-    return info.env
+    return info[2]
 end
 
 local function set_closure_env(fn, newenv)
@@ -513,9 +514,9 @@ local function set_closure_env(fn, newenv)
     if not info then
         return false
     end
-    info.env = newenv
-    if info.fenv and setfenv then
-        info.fenv = pcall(setfenv, fn, newenv)
+    info[2] = newenv
+    if info[3] and setfenv then
+        info[3] = pcall(setfenv, fn, newenv)
     end
     return true
 end
@@ -649,8 +650,8 @@ run_closure = function(fn, trace, ...)
     local F_FORLOOP_ASSIGN_RR, F_FORLOOP_ASSIGN_RK = 162, 163
 
     local info = closure_info[fn]
-    local p = info.p
-    local limits = info.limits or {}
+    local p = info[1]
+    local limits = info[1].limits or {}
     local maxInstructions = limits.maxInstructions
     local instructionBudget = maxInstructions
     local args = pack(...)
@@ -691,13 +692,13 @@ run_closure = function(fn, trace, ...)
         error("stack limit exceeded", 0)
     end
 
-    local cenv = info.env
-    if info.fenv and getfenv then
+    local cenv = info[2]
+    if info[3] and getfenv then
         cenv = getfenv(fn)
     end
 
     local cur = {
-        p = p, ups = info.u, base = base, pc = 1,
+        p = p, ups = info, base = base, pc = 1,
         ret_sp = 0, wanted = -1, va = va, env = cenv, cl = fn,
         line = nil,
     }
@@ -710,7 +711,7 @@ run_closure = function(fn, trace, ...)
 
     local C = p.code
     local K = p.consts
-    local U = info.u
+    local U = info
     local e = cenv
     local pc = 1
     local has_jit = type(jit) == "table"
@@ -1389,8 +1390,8 @@ run_closure = function(fn, trace, ...)
                                                        (type(b) == "table" and getmetatable(b))
                                             local mm = type(mt) == "table" and mt.__add
                                             local mci = mm and closure_info[mm]
-                                            if mci and not mci.p.isvararg then
-                                                local cp = mci.p
+                                            if mci and not mci[1].isvararg then
+                                                local cp = mci[1]
                                                 if limits.maxCallDepth and fi >= limits.maxCallDepth then
                                                     error("call depth limit exceeded", 0)
                                                 end
@@ -1416,13 +1417,13 @@ run_closure = function(fn, trace, ...)
                                                     frame = {}
                                                 end
                                                 frame.p = cp
-                                                frame.ups = mci.u
+                                                frame.ups = mci
                                                 frame.base = fpos
                                                 frame.pc = 1
                                                 frame.ret_sp = top
                                                 frame.wanted = 1
                                                 frame.va = nil
-                                                frame.env = mci.env
+                                                frame.env = mci[2]
                                                 frame.cl = mm
                                                 frame.line = nil
                                                 cur = frame
@@ -1433,8 +1434,8 @@ run_closure = function(fn, trace, ...)
                                                 p = cp
                                                 C = cp.code
                                                 K = cp.consts
-                                                U = mci.u
-                                                e = mci.env
+                                                U = mci
+                                                e = mci[2]
                                                 base = fpos
                                                 maxreg = cmax
                                                 va = nil
@@ -1716,13 +1717,13 @@ run_closure = function(fn, trace, ...)
                                     S[cellreg] = { v = S[base + C[pc + 2] - 1] }
                                     local cp = p.protos[C[pc + 4]]
                                     local ud = cp.updesc
-                                    local ups = {}
+                                    local ups = { cp, e, false, true }
                                     for j = 1, #ud do
                                         local d = ud[j]
                                         if d.instack == 1 then
-                                            ups[j] = S[base + d.idx - 1]
+                                            ups[j + 4] = S[base + d.idx - 1]
                                         else
-                                            ups[j] = U[d.idx]
+                                            ups[j + 4] = U[d.idx + 4]
                                         end
                                     end
                                     S[base + C[pc + 3] - 1] = make_closure(cp, ups, e, false)
@@ -1733,13 +1734,13 @@ run_closure = function(fn, trace, ...)
                                     S[cellreg] = cell
                                     local cp = p.protos[C[pc + 4]]
                                     local ud = cp.updesc
-                                    local ups = {}
+                                    local ups = { cp, e, false, true }
                                     for j = 1, #ud do
                                         local d = ud[j]
                                         if d.instack == 1 then
-                                            ups[j] = S[base + d.idx - 1]
+                                            ups[j + 4] = S[base + d.idx - 1]
                                         else
-                                            ups[j] = U[d.idx]
+                                            ups[j + 4] = U[d.idx + 4]
                                         end
                                     end
                                     local t = S[base + C[pc + 3] - 1]
@@ -1874,10 +1875,10 @@ run_closure = function(fn, trace, ...)
                         else
                             if op == 9 then
                             top = top + 1
-                            S[top] = U[C[pc + 1]].v
+                            S[top] = U[C[pc + 1] + 4].v
                             pc = pc + 4
                             elseif op == 10 then
-                            U[C[pc + 1]].v = S[top]
+                            U[C[pc + 1] + 4].v = S[top]
                             S[top] = nil
                             top = top - 1
                             pc = pc + 4
@@ -2081,8 +2082,8 @@ run_closure = function(fn, trace, ...)
                                    fi >= limits.maxCallDepth then
                                     error("call depth limit exceeded", 0)
                                 end
-                                local cp = fci.p
-                                local cpups = fci.u
+                                local cp = fci[1]
+                                local cpups = fci
                                 local cva = nil
                                 if cp.isvararg then
                                     local nv = nargs - cp.numparams
@@ -2120,8 +2121,8 @@ run_closure = function(fn, trace, ...)
                                     S[fpos + j - 1] = nil
                                 end
 
-                                local cenv = fci.env
-                                if fci.fenv and getfenv then
+                                local cenv = fci[2]
+                                if fci[3] and getfenv then
                                     cenv = getfenv(f)
                                 end
 
@@ -2536,13 +2537,13 @@ run_closure = function(fn, trace, ...)
                                 elseif op == 48 then
                                 local cp = p.protos[C[pc + 1]]
                                 local ud = cp.updesc
-                                local ups = {}
+                                local ups = { cp, e, false, true }
                                 for j = 1, #ud do
                                     local d = ud[j]
                                     if d.instack == 1 then
-                                        ups[j] = S[base + d.idx - 1]
+                                        ups[j + 4] = S[base + d.idx - 1]
                                     else
-                                        ups[j] = U[d.idx]
+                                        ups[j + 4] = U[d.idx + 4]
                                     end
                                 end
                                 top = top + 1

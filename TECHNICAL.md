@@ -108,8 +108,10 @@ Ranges `95–101`, `104–109` and `120–131` are retired: they were folded int
   `parse_return` marks `return f(...)` calls with `C = 1`. When `f` is an interpreted closure, `CALLD` overwrites `cur` in place and jumps to `pc = 1` without growing `fi` or consuming `maxCallDepth`.
 - **Balanced Dispatch Tree:**
   `run_closure` does not walk a linear `if/elseif` opcode chain. Both the base chain (1–51) and the fused chain (52–161) are generated as balanced range trees over the opcode number, with leaves of at most four exact comparisons. A hot instruction such as `ASSIGN_RK` or `JMPF_CMP_RK` is reached in about seven `op <` tests instead of sixty to ninety `elseif` tests, which keeps LuaJIT side traces short. Adding an opcode only lengthens one leaf.
-- **Fast Callback Entry (`info.fast`):**
-  Root chunks wrap `run_closure` in `pcall` to format runtime errors with `format_runtime_error(err, trace)`. Inner closures (such as `__add` metamethods or `table.sort` comparators) set `info.fast = true` and invoke `run_closure` directly when called from the host.
+- **Fast Callback Entry (`info[4]`):**
+  Root chunks wrap `run_closure` in `pcall` to format runtime errors with `format_runtime_error(err, trace)`. Inner closures (such as `__add` metamethods or `table.sort` comparators) set `info[4] = true` and invoke `run_closure` directly when called from the host.
+- **Flat Closure Record:**
+  A closure's metadata and its upvalue cells share one pure-array table registered in the weak `closure_info` map: `[1]` prototype, `[2]` environment, `[3]` native-fenv flag, `[4]` fast flag, and upvalue `j` at `j + 4`. Creating a closure therefore allocates a single array instead of an array plus a hash table, which cut closure-creation cost by roughly a fifth without touching upvalue reads beyond a constant `+ 4` index offset.
 
 ### 5.1 Error reporting, guest `pcall`, and sandbox hygiene
 
