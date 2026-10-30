@@ -21,7 +21,7 @@
 > - **Best For:** Gaming, experimentation, and sandboxed environments.
 > - **Production:** For critical systems, authentication boundaries, or anything handling real user data or money, traditional upstream Lua or LuaJIT remain recommended.
 > 
-**A high-performance, pure-Lua Lua 5.1 source compiler and bytecode VM for sandboxed hosts where `loadstring` is unavailable.**
+**A pure-Lua Lua 5.1 source compiler and bytecode VM for sandboxed hosts where `loadstring` is unavailable.**
 
 ![Lua](https://img.shields.io/badge/Lua-5.1%20%7C%20LuaJIT-2C2D72)
 ![Tests](https://img.shields.io/badge/tests-18%2C711%20passed-brightgreen)
@@ -67,7 +67,7 @@ Lua 5.1 Source
 - **Bounded Stack for Tail Calls:**
   - `return f(...)` reuses the current frame **and** its original stack region, so even millions of tail calls stay within a constant `maxStack` footprint.
 - **Superinstruction Peephole Optimizer (92 Fused Opcodes):**
-  - Fuses local moves, constant loads, binary arithmetic, compound assignments (`s = s + i`, `s = s + t[i]`, `s = (s + i) % k`, `t[i % k] = v`), multiple-assignment swaps (`a, b = b, a`), table reads/writes (`t[k] = v`, `t.field = v`), short-circuit comparisons (`and`/`or`), conditional branches (`if a < b`, `if x % d == 0`), numeric `for` bodies (including `s = s * k`, `s = s % k` and `s = s .. k`), per-iteration closures, table constructors, and zero-overhead `ipairs`/`pairs` generic `for` loops.
+  - Fuses local moves, constant loads, binary arithmetic, compound assignments (`s = s + i`, `s = s + t[i]`, `s = (s + i) % k`, `t[i % k] = v`), multiple-assignment swaps (`a, b = b, a`), table reads/writes (`t[k] = v`, `t.field = v`), short-circuit comparisons (`and`/`or`), conditional branches (`if a < b`, `if x % d == 0`), numeric `for` bodies (including `s = s * k`, `s = s % k` and `s = s .. k`), per-iteration closures, table constructors, and `ipairs`/`pairs` generic `for` loops that run the iterator and the loop step inside one dispatch (`TFOR_1`/`TFOR_2`) instead of a dispatch-heavy sequence.
   - Opcode families share a single opcode with a *kind* stored in a dead slot, so the dispatch tree stays small: all twelve comparison branches, all seven compound assignments, and the whole `and`/`or` test family each cost one opcode instead of six to eighteen.
 
 ---
@@ -221,6 +221,31 @@ luajit benchmarks/median_report.lua run1.csv … run10.csv
 
 It takes the per-case median across runs, reports wins/losses/ties on a 5% tie band, the geometric mean, and writes the aggregated `BENCHMARK_50.md` and `BENCHMARK_50.csv`. Never run two suites at the same time — the CPU contention makes the numbers meaningless.
 
+Note that this suite runs under **LuaJIT with the JIT enabled**. That is the right profile for comparing two interpreters on equal terms, but it is not the profile GoogiVM runs in inside Scrap Mechanic, where the JIT never compiles the VM's own dispatch loop. The suite below measures that second profile.
+
+### Real-world suite (the game profile)
+
+[`benchmarks/benchreal.lua`](benchmarks/benchreal.lua) runs 16 full workloads adapted from [The Computer Language Benchmarks Game](https://benchmarksgame-team.pages.debian.net/benchmarksgame/) — `nbody`, `spectral-norm`, `mandelbrot`, `binary-trees`, `fannkuch-redux`, `pidigits`, `fasta`, `k-nucleotide`, `sieve`, `queens`, `matmul`, `quicksort`, `wordfreq`, `oop`, `jsonencode`, `hanoi`. These are complete programs rather than microbenchmarks, so they are much closer to what a computer program in a mod actually does. Every case returns a value that is checked against a known expectation, so a wrong result is reported instead of silently timed.
+
+```bash
+luajit -joff benchmarks/benchreal.lua      # the in-game profile
+luajit benchmarks/benchreal.lua            # the JIT profile
+```
+
+Medians of three runs on one machine, seconds:
+
+| Engine | Total |
+|---|---:|
+| Native PUC Lua 5.1 (reference only) | 0.467 |
+| **GoogiVM, JIT enabled** | **2.343** |
+| **GoogiVM, `-joff` (game profile)** | **6.902** |
+| Upstream FiOne, `-joff` | 7.763 |
+
+Against FiOne that is **3.31x** with the JIT on and **1.12x** with the JIT off. The difference is structural: with the JIT, GoogiVM's dispatch loop becomes machine code; with `-joff` every VM instruction costs a host interpreter dispatch, while FiOne — already a pure interpreter — is unaffected by the flag. This is the honest number for Scrap Mechanic.
+
+Under `-joff` the suite is **5 wins, 10 losses, 1 tie**: it wins `binary-trees` 1.66x, `hanoi` 1.60x, `oop` 1.47x, `spectral-norm` 1.38x and `jsonencode` 1.34x, ties `fasta`, and loses `sieve` 0.49x, `fannkuch-redux` 0.60x, `quicksort` 0.67x, `mandelbrot` 0.68x, `wordfreq` 0.69x, `k-nucleotide` 0.70x, `pidigits` 0.75x, `matmul` 0.80x, `queens` 0.80x and `nbody` 0.89x. The split is consistent: work that is dominated by calls, tables and allocation favours the fused dispatcher, and tight numeric kernels — where almost every source statement is a single arithmetic instruction — favour the smaller per-instruction cost of a bytecode interpreter. Against the native PUC Lua 5.1 interpreter GoogiVM is about 14.8x slower, which is the expected cost of interpreting Lua bytecode from inside Lua.
+
+
 ---
 
 ### ScrapComputers library benchmark
@@ -243,7 +268,7 @@ See [`TECHNICAL.md`](TECHNICAL.md) for a deep dive into the compiler, bytecode f
 3. **Peephole Superinstruction Optimizer (`optimize_code`):**
    - Scans jump targets first so it never fuses across a branch destination.
    - Replaces multi-instruction sequences in place (marking trailing slots dead and advancing `pc` by `4 * len`).
-   - Fuses loop control (`FORLOOP_MOV`, `FORLOOP_CELL`) with hot loop bodies (`FORLOOP_ADD_RR`, `FORLOOP_ADD_INDEX`, `FORLOOP_SETINDEX_RR`, `FORLOOP_MOD_RR_EQ_K`, `FORLOOP_NEWTABLE_SETINDEX_R`).
+   - Fuses loop control (`FORLOOP_MOV`, `FORLOOP_CELL`) with hot loop bodies (`FORLOOP_ADD_RR/RK`, `FORLOOP_SUB_RR/RK`, `FORLOOP_ASSIGN_RR/RK`, `FORLOOP_ADD_INDEX`, `FORLOOP_SETINDEX_RR/RK`, `FORLOOP_MOD_RR_EQ_K`, `FORLOOP_NEWTABLE_SETINDEX_R`).
    - Fuses generic `for` loops into `TFOR_1` and `TFOR_2` with direct in-VM `ipairs` and `next` iteration.
 4. **Explicit Call Frames & Frame Pool:**
    - Custom-to-custom function calls (`CALLD`) push a lightweight frame onto `frames[]` (reusing pooled frame tables from `free_frames`) and jump to `pc = 1` inside the same `while true` loop — avoiding host Lua C-stack recursion.
@@ -276,7 +301,7 @@ README.md                    # Project overview, API, and benchmark summary
 TECHNICAL.md                 # Internal architecture and opcode reference
 BENCHMARK_50.md              # 50-case benchmark report (GoogiVM vs FiOne)
 BENCHMARK_50.csv             # Per-case medians, bests and repetition counts
-benchmarks/                  # Runnable 50-case harness
+benchmarks/                  # Benchmark harnesses (50-case, real-world, ScrapComputers, median aggregator)
 run_all_tests.lua            # Automated test runner
 tests/                       # 17 test modules + test suite documentation
 AGENTS.md                    # Guidelines and invariants for AI coding agents
