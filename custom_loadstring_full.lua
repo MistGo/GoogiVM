@@ -332,30 +332,78 @@ local function native_name_of(fn, env)
     return name
 end
 
-local function append_trace(out, trace, head)
+local function append_trace(out, trace)
     local frames = trace.frames
     local fi = trace.fi
-    if frames and fi and fi > 1 then
-        local skipped_head = false
-        for i = fi - 1, 1, -1 do
-            local fr = frames[i]
-            if fr then
+    if not frames or not fi then
+        return out
+    end
+
+    local function frame_line(fr)
+        local fl = fr.line
+        if not fl then
+            local fpc = fr.pc or 1
+            fl = fr.p.lines and fr.p.lines[fpc]
+        end
+        return fl
+    end
+
+    local function inline_site(fp, pc)
+        local sites = fp.inline_sites
+        if sites and pc then
+            for i = #sites, 1, -1 do
+                local site = sites[i]
+                if pc >= site.start and pc <= site.finish then
+                    return site
+                end
+            end
+        end
+        return nil
+    end
+
+    out = out .. "\nstack traceback:"
+
+    -- `error` is a native function, so the native LuaJIT shape starts with
+    -- a C frame.  Other runtime errors start at the innermost Lua frame.
+    if last_native_fn == error then
+        out = out .. "\n\t[C]: in function 'error'"
+    end
+
+    for i = fi, 1, -1 do
+        local fr = frames[i]
+        if fr then
+            local fl
+            if i == fi and trace[1] then
+                fl = fr.p.lines and fr.p.lines[trace[1]]
+            end
+            fl = fl or frame_line(fr)
+            if fl then
                 local fp = fr.p
-                local fl = fr.line
-                if not fl then
-                    local fpc = fr.pc or 1
-                    fl = fp.lines and fp.lines[fpc]
+                local src = fp.sourceName or "<string>"
+                local site
+                if i == fi and trace[1] then
+                    site = inline_site(fp, trace[1])
                 end
-                if fl then
-                    local tag = (fp.sourceName or "<string>") .. ":" .. fl
-                    if not skipped_head and tag == head then
-                        -- The header already points at this frame (for
-                        -- example error("m", 2) blaming the caller).
-                        skipped_head = true
+                if site then
+                    local inline_name = site.name
+                    if inline_name then
+                        out = out .. "\n\t" .. src .. ":" .. fl ..
+                            ": in function '" .. inline_name .. "'"
                     else
-                        out = out .. "\n  at " .. tag
+                        out = out .. "\n\t" .. src .. ":" .. fl ..
+                            ": in function <" .. src .. ":" .. fl .. ">"
                     end
+                    fl = site.call_line or fl
                 end
+                local label
+                if i == 1 then
+                    label = "in main chunk"
+                elseif fp.name then
+                    label = "in function '" .. fp.name .. "'"
+                else
+                    label = "in function <" .. src .. ":" .. fl .. ">"
+                end
+                out = out .. "\n\t" .. src .. ":" .. fl .. ": " .. label
             end
         end
     end
@@ -2978,6 +3026,7 @@ run_closure = function(fn, trace, ...)
                                 elseif f == error then
                                     -- Reimplement `error(msg, level)` against interpreted
                                     -- frames so `level` selects the right sandbox location.
+                                    last_native_fn = f
                                     local msg = S[fpos + 1]
                                     local level = S[fpos + 2]
                                     if type(msg) ~= "string" then
@@ -3788,6 +3837,7 @@ local function custom_loadstring(source, env, opts)
                 isvararg = isvararg, numparams = numparams,
                 loop_depth = 0, loop_breaks = {},
                 has_inline = false,
+                inline_sites = {},
             }
         end
 
@@ -5514,6 +5564,9 @@ local function custom_loadstring(source, env, opts)
                 return pc
             end
 
+            local inline_start = fc.ncode + 1
+            local inline_call_line = line_of(last_tp)
+
             for p = 1, proto.rawncode - 11, 4 do
                 local op = proto.rawcode[p]
                 local line = proto.lines and proto.lines[p]
@@ -5539,6 +5592,12 @@ local function custom_loadstring(source, env, opts)
                     ins(op, 0, 0, 0, line)
                 end
             end
+            fc.inline_sites[#fc.inline_sites + 1] = {
+                start = inline_start,
+                finish = fc.ncode,
+                name = proto.name,
+                call_line = inline_call_line,
+            }
             clear_multi()
             fc.has_inline = true
             return true
@@ -5958,8 +6017,10 @@ local function custom_loadstring(source, env, opts)
                 rawncode = rawncode,
                 simple = simple,
                 has_inline = child.has_inline,
+                inline_sites = child.inline_sites,
                 env = env,
                 sourceName = sourceName,
+                name = nil,
                 protos = all_protos,
                 limits = limits,
             }
@@ -6180,12 +6241,14 @@ local function custom_loadstring(source, env, opts)
                 if tk ~= "name" then
                     fail("local function name expected")
                 end
+                local fname = tv
                 local desc = new_local(tv)
                 advance()
                 emit(LOADNIL, 1, 0, 0)
                 emit(SETLOCAL, desc.slot, 0, 0)
                 emit_cell(desc)
                 local idx = compile_funcbody(false)
+                all_protos[idx].name = fname
                 emit(CLOSURE, idx, 0, 0)
                 emit_local_set(desc)
                 desc.func_idx = idx
@@ -6488,6 +6551,7 @@ local function custom_loadstring(source, env, opts)
             end
             local oldreg = fc.nextreg
             local name = tv
+            local fname = name
             advance()
             local kind, ref = resolve_var(name)
             local target
@@ -6501,6 +6565,7 @@ local function custom_loadstring(source, env, opts)
                         if tk ~= "name" then
                             fail("field name expected")
                         end
+                        fname = tv
                         local key = addk(tv)
                         advance()
                         if tk == "." or tk == ":" then
@@ -6518,6 +6583,7 @@ local function custom_loadstring(source, env, opts)
                         if tk ~= "name" then
                             fail("method name expected")
                         end
+                        fname = tv
                         local key = addk(tv)
                         advance()
                         if tk ~= "(" then
@@ -6537,6 +6603,7 @@ local function custom_loadstring(source, env, opts)
             end
 
             local idx = compile_funcbody(method)
+            all_protos[idx].name = fname
             emit(CLOSURE, idx, 0, 0)
             emit_store_target(target)
             fc.nextreg = oldreg

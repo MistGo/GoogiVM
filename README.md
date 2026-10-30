@@ -62,7 +62,7 @@ Lua 5.1 Source
   - Blocks `getfenv`/`setfenv` on native C/host functions and `setfenv(0, ...)`, including when they are reached through guest `pcall`/`xpcall`, so untrusted code cannot escape into the host `_G`.
 - **Source-Line Tracebacks:**
   - Syntax errors report exact line numbers and nearby tokens.
-  - Runtime errors are rewritten to `sourceName:line: message` with a full call-stack traceback across interpreted frames.
+  - Runtime errors are rewritten to `sourceName:line: message` with a Lua-style `stack traceback:` across interpreted frames, including function names, `main chunk`, anonymous `<source:line>` labels and synthetic frames for inlined leaf functions.
   - Guest `pcall`/`xpcall` around interpreted closures keep the same sandbox format: host file paths and internal VM line numbers are never exposed.
 - **Bounded Stack for Tail Calls:**
   - `return f(...)` reuses the current frame **and** its original stack region, so even millions of tail calls stay within a constant `maxStack` footprint.
@@ -307,8 +307,8 @@ lua run_all_tests.lua
 ```
 
 Expected output:
-- **LuaJIT 2.1.1720049189:** `TOTAL: 18732 checks, 0 failed`
-- **Lua 5.4.6:** `TOTAL: 18708 checks, 0 failed`
+- **LuaJIT 2.1.1720049189:** `TOTAL: 18736 checks, 0 failed`
+- **Lua 5.4.6:** `TOTAL: 18712 checks, 0 failed`
 
 See [`tests/README.md`](tests/README.md) for a description of all 17 test modules.
 

@@ -167,7 +167,8 @@ return a()
         local ok, err = pcall(f)
         t:check(not ok and type(err) == "string" and
             err:find("trace.lua:3:", 1, true) ~= nil and
-            err:find("  at trace.lua:", 1, true) ~= nil,
+            err:find("stack traceback:", 1, true) ~= nil and
+            err:find("trace.lua:3: in function 'b'", 1, true) ~= nil,
             "runtime traceback: " .. tostring(err))
     end
 

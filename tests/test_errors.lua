@@ -203,14 +203,36 @@ h()
 ]], t.env, { sourceName = "tb.lua" }))
         local ran, gerr = pcall(chunk)
         t:check(not ran and type(gerr) == "string" and
-            gerr:find("  at tb.lua:3", 1, true) ~= nil,
+            gerr:find("stack traceback:", 1, true) ~= nil,
+            "traceback heading: " .. tostring(gerr))
+        t:check(not ran and type(gerr) == "string" and
+            gerr:find("[C]: in function 'error'", 1, true) ~= nil,
+            "traceback native frame: " .. tostring(gerr))
+        t:check(not ran and type(gerr) == "string" and
+            gerr:find("in function 'g'", 1, true) ~= nil,
+            "traceback inner name: " .. tostring(gerr))
+        t:check(not ran and type(gerr) == "string" and
+            gerr:find("tb.lua:3: in function 'f'", 1, true) ~= nil,
             "traceback call site 1: " .. tostring(gerr))
         t:check(not ran and type(gerr) == "string" and
-            gerr:find("  at tb.lua:6", 1, true) ~= nil,
+            gerr:find("tb.lua:6: in function 'h'", 1, true) ~= nil,
             "traceback call site 2: " .. tostring(gerr))
         t:check(not ran and type(gerr) == "string" and
-            gerr:find("  at tb.lua:8", 1, true) ~= nil,
+            gerr:find("tb.lua:8: in main chunk", 1, true) ~= nil,
             "traceback call site 3: " .. tostring(gerr))
+    end
+
+    -- Anonymous functions use the native `<source:line>` traceback label.
+    do
+        local chunk = assert(t.custom([[
+local f = function() return nil + 1 end
+local x = f()
+return x
+]], t.env, { sourceName = "anon.lua" }))
+        local ran, gerr = pcall(chunk)
+        t:check(not ran and type(gerr) == "string" and
+            gerr:find("in function <anon.lua:1>", 1, true) ~= nil,
+            "anonymous traceback label: " .. tostring(gerr))
     end
 
     -- Host argument errors report the real callee name, not the VM local `f`.

@@ -144,7 +144,14 @@ Opcode numbers `192` and `197` are unused gaps.
 ### 5.1 Error reporting, guest `pcall`, and sandbox hygiene
 
 `format_runtime_error(err, trace)` builds `<sourceName>:<line>: <message>` and
-appends one `at <sourceName>:<line>` line per interpreted frame.
+appends a Lua-style `stack traceback:` with tab-indented frames. Named local,
+global, and method functions use `in function 'name'`; the root chunk uses
+`in main chunk`; anonymous functions use `in function <source:line>`. When the
+error came from the native `error` function, a leading
+`[C]: in function 'error'` frame is included. Leaf functions inlined by the
+optimizer carry an `inline_sites` range; the traceback adds a synthetic callee
+frame and moves the caller frame to the call site, so inlining does not erase
+the callee from the trace.
 
 Two details keep host information out of the sandbox:
 
