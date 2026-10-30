@@ -68,7 +68,7 @@ When a local variable is declared, the compiler emits a `NOP` placeholder (`cell
 | `36–43` | `NEWTABLE`, `FIELD`, `INDEX`, `SETFIELD`, `SETINDEX`, `SELF`, `SETLIST`, `SETLISTMULTI` | Table creation, reads, writes, methods, and array initializers |
 | `44–50` | `MARK`, `POP`, `FORPREP`, `FORLOOP`, `CLOSURE`, `PEEK`, `NOP` | Multi-return markers, numeric `for`, closures, and stack helpers |
 
-### Fused Superinstructions (`52–168`)
+### Fused Superinstructions (`52–196`)
 
 `optimize_code(co, n)` runs after a function is compiled. **It never shifts instruction addresses:** it overwrites the first instruction of a matched pattern and marks the remaining `len - 1` instruction slots in `dead[]`. The VM advances `pc` by `4 * len` (e.g., `+8`, `+12`, `+16`, `+20`, `+24`, `+32`, `+36`, `+40`, `+48`, `+56`, `+72`, or `+96`).
 
@@ -95,8 +95,15 @@ Several opcode families share one opcode and carry a **kind** in a dead slot (`C
 | `162–163` | `FORLOOP_ASSIGN_RR`, `FORLOOP_ASSIGN_RK` | Numeric `for` step fused with a loop-body assignment for `*`, `/`, `%`, `^` and `..`; the operator rides in the dead slot (`13`–`19` encoding) |
 | `164–166` | `PUSH_OP_RK`, `PUSH_OP_RS`, `PUSH_OP_KS` | Left-to-right arithmetic chains (`k <op> a`, `<stack> <op> a`, `<stack> <op> k`) that the register-only `*_RR`/`*_RK` opcodes cannot cover; the operator rides in the dead slot (`13`–`19`) |
 | `167–168` | `ASSIGN_TO_RR`, `ASSIGN_TO_RK` | `dest = a <op> b` when the destination is not the left operand (for example `zr2 = zr * zr`): one dispatch instead of an arithmetic opcode plus `SETLOCAL`; the operator rides in the dead slot (`13`–`19`) |
+| `169–180` | `JMPT_CMP_RR_*`, `JMPT_CMP_RK_*` | Loop back-edge: comparison fused with a jump back to the body when true; the comparison kind is part of the opcode number (12 opcodes) |
+| `181–184` | `CALL_U_RR2`, `CALL_U_RR1`, `CALL_R_RR2`, `CALL_R_RR1` | Direct call of an upvalue/local function with one or two register arguments; skips the `GETUPVAL`/`GETLOCAL` + `MARK` setup and pushes the callee frame in the same dispatch |
+| `187–190` | `ADD_RR_ADD_K`, `MUL_DIV_K`, `ADD_R_ADD_K`, `DIV_RET` | Two-step arithmetic chains: `(a + b) + k`, `(a * b) / k`, `acc + a + k`, and `1.0 / d` immediately followed by `RET` |
+| `193` | `SETINDEX_MUL3` | `t[k] = t[k] ± x * y * z`; operands are encoded as `+register` or `-upvalue`, so nbody's six updates collapse from nine dispatches to one |
+| `194` | `SETINDEX_MUL2` | `t[k] = t[k] ± a * t[k2]`; `a` is `+register`/`-upvalue`, `k2` is `+register`/`-constant` |
+| `195` | `FORLOOP_SETTRUE` | Numeric `for` whose body is `t[i] = true` (sieve): increments the control variable and performs the store in one dispatch |
+| `196` | `ASSIGN_MUL3_ADD` | `dest = k * a * b + c` (mandelbrot inner assignment) |
 
-Ranges `95–101`, `104–109` and `120–131` are retired: they were folded into `ASSIGN_*` (154–156) and `JMPF_CMP_*` (151–153).
+Opcode numbers `185–186` and `191–192` are unused gaps. Ranges `95–101`, `104–109` and `120–131` are retired: they were folded into `ASSIGN_*` (154–156) and `JMPF_CMP_*` (151–153).
 
 ---
 
@@ -107,9 +114,11 @@ Ranges `95–101`, `104–109` and `120–131` are retired: they were folded int
 - **Frame Pooling (`free_frames`):**
   Returning from an interpreted call recycles the frame table into `free_frames` (up to 64 entries), eliminating table allocations on hot call paths (`fib`, recursion, closures).
 - **Tail-Call Optimization (`CALLD` with `C = 1`):**
-  `parse_return` marks `return f(...)` calls with `C = 1`. When `f` is an interpreted closure, `CALLD` overwrites `cur` in place and jumps to `pc = 1` without growing `fi` or consuming `maxCallDepth`.
+  `parse_return` marks `return f(...)` calls with `C = 1`. When `f` is an interpreted closure, `CALLD` overwrites `cur` in place and jumps to `pc = proto.entry` without growing `fi` or consuming `maxCallDepth`.
+- **Entry NOP Skip:**
+  `emit_cell` reserves one `NOP` slot per parameter/local in case it is captured later and must become a `CELL`. At the end of compilation, `proto.entry` points at the first non-`NOP` instruction; frame setup starts there, so uncaptured parameter placeholders are never dispatched. Captured slots have already been rewritten to `CELL`, so they are still executed.
 - **Balanced Dispatch Tree:**
-  `run_closure` does not walk a linear `if/elseif` opcode chain. Both the base chain (1–51) and the fused chain (52–161) are generated as balanced range trees over the opcode number, with leaves of at most four exact comparisons. A hot instruction such as `ASSIGN_RK` or `JMPF_CMP_RK` is reached in about seven `op <` tests instead of sixty to ninety `elseif` tests, which keeps LuaJIT side traces short. Adding an opcode only lengthens one leaf.
+  `run_closure` does not walk a linear `if/elseif` opcode chain. Both the base chain (1–51) and the fused chain (52–196) are generated as balanced range trees over the opcode number, with leaves of at most four exact comparisons. A hot instruction such as `ASSIGN_RK` or `JMPF_CMP_RK` is reached in about seven `op <` tests instead of sixty to ninety `elseif` tests, which keeps LuaJIT side traces short. Adding an opcode only lengthens one leaf.
 - **Fast Callback Entry (`info[4]`):**
   Root chunks wrap `run_closure` in `pcall` to format runtime errors with `format_runtime_error(err, trace)`. Inner closures (such as `__add` metamethods or `table.sort` comparators) set `info[4] = true` and invoke `run_closure` directly when called from the host.
 - **Flat Closure Record:**

@@ -196,4 +196,64 @@ local function base() log[#log + 1] = 'b'; return t end
 base()[n(1)] = n(2)
 return t[1], table.concat(log, ',')
 ]], P(2, "b,1,2"))
+
+    -- Sieve-style numeric loop: `t[i] = true`.
+    t:expect([[
+local t = {}
+for j = 2, 100, 3 do t[j] = true end
+local n = 0
+for j = 1, 100 do if t[j] then n = n + 1 end end
+return n
+]], P(33))
+
+    -- Nbody-style indexed update with three multiplied operands.
+    t:expect([[
+local b = {1, 2, 3, 4, 5, 6, 7}
+local dx, dy, m2, mag = 0.5, 0.25, 2, 3
+b[4] = b[4] - dx * m2 * mag
+b[5] = b[5] + dy * m2 * mag
+return b[4], b[5]
+]], P(1, 6.5))
+
+    -- Mandelbrot-style `k * a * b + c` assignment.
+    t:expect([[
+local zr, zi, ci = 1.5, 2.5, 0.25
+local zr2, zi2 = zr * zr, zi * zi
+zi = 2.0 * zr * zi + ci
+zr = zr2 - zi2 + 0.5
+return zr, zi
+]], P(-3.5, 7.75))
+
+    -- `s = s + (a + b)` numeric fast path.
+    t:expect([[
+local a, b = 2, 3
+local s = 0
+for i = 1, 10 do s = s + (a + b) end
+return s
+]], P(50))
+
+    -- `s = s + (a + b)` with `__add` on both operands.
+    t:expect([[
+local mt = {__add = function(a, b) return a.n + b.n end}
+local a = setmetatable({n = 1}, mt)
+local b = setmetatable({n = 2}, mt)
+local s = 0
+for i = 1, 10 do s = s + (a + b) end
+return s
+]], P(30))
+
+    -- Fused indexed update must keep `__index` / `__newindex` order.
+    t:expect([[
+local log = {}
+local t = setmetatable({}, {
+    __index = function(_, k) log[#log + 1] = 'g' .. k; return 10 end,
+    __newindex = function(tt, k, v) log[#log + 1] = 's' .. k .. v; rawset(tt, k, v) end,
+})
+local dx, m2, mag = 2, 3, 4
+local function update()
+    t[1] = t[1] - dx * m2 * mag
+    return t[1]
+end
+return update(), table.concat(log, ',')
+]], P(-14, "g1,s1-14"))
 end

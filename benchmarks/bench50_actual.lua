@@ -71,7 +71,7 @@ local WORK_DIR = absolute(os.getenv("BENCH_DIR")
     or (arg and arg[3])
     or "bench50-work")
 
-local SAMPLES = 7
+local SAMPLES = 10
 local MIN_SAMPLE = 0.02
 
 if not io.open(FIONE_PATH, "rb") then
@@ -257,7 +257,10 @@ local function measure(fn)
     local sorted = {}
     for i = 1, SAMPLES do sorted[i] = samples[i] end
     table.sort(sorted)
-    return sorted[(SAMPLES + 1) / 2], best, reps, samples
+    local mid = math.floor(SAMPLES / 2)
+    local med = (SAMPLES % 2 == 1) and sorted[mid + 1]
+        or ((sorted[mid] + sorted[mid + 1]) / 2)
+    return med, best, reps, samples
 end
 
 local rows = {}
