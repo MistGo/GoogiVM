@@ -165,6 +165,11 @@ local FOP = {
     CALL_U_RR2 = 181, CALL_U_RR1 = 182,
     CALL_R_RR2 = 183, CALL_R_RR1 = 184,
 
+    -- `{v, v + k1, v + k2}` built directly into an existing local.
+    NEWTABLE_LIST3_RK = 185,
+    -- `t[i], t[j] = t[j], t[i]`.
+    SWAP_INDEX = 186,
+
     ADD_RR_ADD_K = 187, MUL_DIV_K = 188,
     ADD_R_ADD_K = 189, DIV_RET = 190,
 
@@ -2210,6 +2215,23 @@ run_closure = function(fn, trace, ...)
                                             if nres == 1 then top = top + 1; S[top] = r end
                                             pc = pc + 16
                                         end
+                                    elseif op == 185 then
+                                        local v = S[base + C[pc + 2] - 1]
+                                        S[base + C[pc + 1] - 1] = {
+                                            v,
+                                            v + K[C[pc + 3]],
+                                            v + K[C[pc + 4]],
+                                        }
+                                        pc = pc + 60
+                                    elseif op == 186 then
+                                        local t = S[base + C[pc + 1] - 1]
+                                        local i = S[base + C[pc + 2] - 1]
+                                        local j = S[base + C[pc + 3] - 1]
+                                        local a = t[i]
+                                        local b = t[j]
+                                        t[j] = a
+                                        t[i] = b
+                                        pc = pc + 64
                                     elseif op == 187 then
                                         top = top + 1
                                         S[top] = S[base + C[pc + 1] - 1] + S[base + C[pc + 2] - 1] + K[C[pc + 3]]
@@ -4502,6 +4524,32 @@ local function custom_loadstring(source, env, opts)
                     end
                 end
 
+                -- `{v, v + k1, v + k2}` from the original constructor
+                -- sequence, before the smaller SETLIST fusions split it up.
+                if pos + 60 <= n and co[pos] == NEWTABLE and
+                   co[pos + 4] == SETLOCAL and
+                   co[pos + 8] == MARK and co[pos + 12] == GETLOCAL and
+                   co[pos + 16] == SETLIST and co[pos + 18] == 1 and
+                   co[pos + 20] == MARK and co[pos + 24] == GETLOCAL and
+                   co[pos + 28] == LOADK and co[pos + 32] == ADD and
+                   co[pos + 36] == SETLIST and co[pos + 38] == 2 and
+                   co[pos + 40] == MARK and co[pos + 44] == GETLOCAL and
+                   co[pos + 48] == LOADK and co[pos + 52] == ADD and
+                   co[pos + 56] == SETLIST and co[pos + 58] == 3 and
+                   no_targets(pos, 15) then
+                    local treg = co[pos + 5]
+                    local v = co[pos + 13]
+                    local k1 = co[pos + 29]
+                    local k2 = co[pos + 49]
+                    if co[pos + 17] == treg and co[pos + 25] == v and
+                       co[pos + 37] == treg and co[pos + 45] == v and
+                       co[pos + 57] == treg then
+                        put(pos, FOP.NEWTABLE_LIST3_RK, treg, v, k1, 15)
+                        co[pos + 4] = k2
+                        return pos + 60
+                    end
+                end
+
                 -- table allocation directly into local register
                 if pos + 68 <= n and co[pos] == NEWTABLE and
                    co[pos + 4] == SETLOCAL and
@@ -5147,6 +5195,55 @@ local function custom_loadstring(source, env, opts)
                        no_targets(body, 6) then
                         co[pc] = FOP.FORLOOP_SETTRUE
                     end
+                end
+            end
+
+            -- `t[i], t[j] = t[j], t[i]` after the first pass has fused the
+            -- indexed reads into INDEX_RR.  Keep this in a second pass: at
+            -- the assignment's first instruction the future INDEX_RR pair
+            -- does not exist yet.
+            local spos = 1
+            while spos <= n do
+                if not dead[spos] and spos + 64 <= n and
+                   co[spos] == GETLOCAL and
+                   co[spos + 4] == FOP.MOVLOCAL and
+                   co[spos + 12] == SETLOCAL and
+                   co[spos + 16] == GETLOCAL and
+                   co[spos + 20] == FOP.MOVLOCAL and
+                   co[spos + 28] == SETLOCAL and
+                   co[spos + 32] == FOP.INDEX_RR and
+                   co[spos + 44] == FOP.INDEX_RR and
+                   co[spos + 56] == SETINDEX and
+                   co[spos + 60] == SETINDEX and
+                   no_targets(spos, 16) then
+                    local table_reg = co[spos + 1]
+                    local k1_temp = co[spos + 5]
+                    local k1_src = co[spos + 6]
+                    local base1 = co[spos + 13]
+                    local table2 = co[spos + 17]
+                    local k2_temp = co[spos + 21]
+                    local k2_src = co[spos + 22]
+                    local base2 = co[spos + 29]
+                    local idx1_table = co[spos + 33]
+                    local idx1_key = co[spos + 34]
+                    local idx2_table = co[spos + 45]
+                    local idx2_key = co[spos + 46]
+                    local set2_base = co[spos + 57]
+                    local set2_key = co[spos + 58]
+                    local set1_base = co[spos + 61]
+                    local set1_key = co[spos + 62]
+                    if table_reg == table2 and
+                       idx1_table == table_reg and idx2_table == table_reg and
+                       k1_temp == set1_key and k2_temp == set2_key and
+                       base1 == set1_base and base2 == set2_base and
+                       k1_src == idx2_key and k2_src == idx1_key then
+                        put(spos, FOP.SWAP_INDEX, table_reg, k1_src, k2_src, 16)
+                        spos = spos + 64
+                    else
+                        spos = spos + 4
+                    end
+                else
+                    spos = spos + 4
                 end
             end
 

@@ -114,7 +114,7 @@ Several opcode families share one opcode and carry a **kind** in a dead slot (`C
 | `207` | `DIV_K` | `k / x`, used when inlining a leaf whose constant numerator can stay out of the caller stack |
 | `208` | `DIV_K_MUL_ADD_SETLOCAL_FORLOOP` | `DIV_K` followed by the loop-end multiply/add/store |
 
-Opcode numbers `185–186`, `191–192` and `197` are unused gaps.
+Opcode numbers `191-192` and `197` are unused gaps.
 
 ### Leaf-Function Inlining
 

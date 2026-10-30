@@ -31,6 +31,24 @@ for i = 1, 100 do s = s + t.i end
 return s
 ]], P(10000))
 
+    -- Three-element list constructor: {v, v + k1, v + k2}.
+    t:expect([[
+local s = 0
+for i = 1, 3 do
+    local t = {i, i + 1, i + 2}
+    s = s + t[1] + t[2] + t[3]
+end
+return s
+]], P(27))
+
+    -- Indexed swap: t[i], t[j] = t[j], t[i].
+    t:expect([[
+local t = {10, 20, 30}
+local i, j = 1, 3
+t[i], t[j] = t[j], t[i]
+return t[1], t[2], t[3]
+]], P(30, 20, 10))
+
     -- Local copy/constant assignment fusion.
     t:expect([[
 local a = 1
