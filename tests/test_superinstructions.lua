@@ -291,6 +291,27 @@ end
 return count()
 ]], P(2))
 
+    -- Fused `dest = c + b*a` followed by the numeric-for back-edge.
+    t:expect([[
+local a, b, c = 1, 2, 3
+for i = 1, 2 do
+    a = ((c + 5) + (i * (c + 3)))
+end
+return a
+]], P(20))
+
+    -- Indexed read immediately followed by a two-argument upvalue call.
+    t:expect([[
+local v = {10, 20, 30}
+local function add(i, j) return i + j end
+local function run()
+    local s = 0
+    for j = 1, 2 do s = s + v[j + 1] * add(j, 100) end
+    return s
+end
+return run()
+]], P(5080))
+
     -- `(a - b) + c` must keep `__sub` / `__add` operand order.
     t:expect([[
 local log = {}
