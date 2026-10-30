@@ -269,6 +269,28 @@ local r = c + getx() * gety()
 return r.n, table.concat(log, ',')
 ]], P(10, "m23,a46"))
 
+    -- Indexed comparison with `__lt` must keep operand order.
+    t:expect([[
+local log = {}
+local mt = {__lt = function(a, b) log[#log + 1] = 'l' .. a.n .. b.n; return a.n < b.n end}
+local t = setmetatable({}, {__index = function(_, k) return setmetatable({n = k}, mt) end})
+local pivot = setmetatable({n = 2}, mt)
+local c = 0
+for i = 1, 3 do if t[i] < pivot then c = c + 1 end end
+return c, table.concat(log, ',')
+]], P(1, "l12,l22,l32"))
+
+    -- Indexed comparison against a constant, with the table as an upvalue.
+    t:expect([[
+local t = {10, 20, 30}
+local function count()
+    local c = 0
+    for i = 1, 3 do if t[i] < 25 then c = c + 1 end end
+    return c
+end
+return count()
+]], P(2))
+
     -- Fused indexed update must keep `__index` / `__newindex` order.
     t:expect([[
 local log = {}
