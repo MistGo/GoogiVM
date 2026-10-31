@@ -583,9 +583,23 @@ local function protected_call(is_xpcall, target, handler, tr, outer_trace,
     return rs
 end
 
+-- Filled in after the legacy interpreter; make_closure consults it only when
+-- a prototype explicitly opts into the v2 closure backend.
+local closure_backend = {}
+
 local function make_closure(proto, upvals, fenv, set_native_env)
     local info
+    local chain
+    if proto.backend == "closure" and closure_backend.scan_block then
+        local block = closure_backend.scan_block(proto)
+        if block then
+            chain = closure_backend.build_block_chain(proto, block)
+        end
+    end
     local function closure(...)
+        if chain then
+            return closure_backend.run_block_chain(proto, chain, ...)
+        end
         if info[4] then
             return run_closure(closure, nil, ...)
         end
@@ -3418,10 +3432,304 @@ run_closure = function(fn, trace, ...)
         end
     end
 end
+-- v2 groundwork: walk one linear block using the compiler's slot lengths.
+-- The current optimizer already knows the exact span of every instruction;
+-- the closure backend must not guess it from the opcode number.
+function closure_backend.scan_block(proto, start)
+    local code = proto.code
+    local len = proto.slotlen
+    local n = proto.ncode or #code
+    if not len then
+        return nil, "prototype has no slot lengths"
+    end
+    start = start or proto.entry or 1
+    if start < 1 or start > n or not len[start] then
+        return nil, "invalid block start"
+    end
+
+    local ops = {}
+    local pc = start
+    while pc <= n do
+        local slots = len[pc]
+        if not slots or slots < 1 then
+            return nil, "missing slot length at pc " .. tostring(pc)
+        end
+        local op = code[pc]
+        ops[#ops + 1] = {
+            pc = pc,
+            op = op,
+            a = code[pc + 1],
+            b = code[pc + 2],
+            c = code[pc + 3],
+            slots = slots,
+        }
+        local nextpc = pc + slots * 4
+        -- RET, JMP, JMPF, TESTF, TESTT, CALLD, FORPREP, FORLOOP, JMPNIL.
+        if op == 34 or op == 32 or op == 31 or op == 29 or op == 30 or
+           op == 33 or op == 46 or op == 47 or op == 51 then
+            return {
+                start = start,
+                finish = pc,
+                nextpc = nextpc,
+                ops = ops,
+            }
+        end
+        pc = nextpc
+    end
+    return {
+        start = start,
+        finish = pc,
+        nextpc = pc,
+        ops = ops,
+    }
+end
+
+-- First closure-threaded slice: straight-line stack arithmetic and returns.
+-- It is deliberately opt-in; unsupported opcodes make the builder fail and
+-- the caller can keep using run_closure.
+local ARITH = {
+    [13] = function(x, y) return x + y end,
+    [14] = function(x, y) return x - y end,
+    [15] = function(x, y) return x * y end,
+    [16] = function(x, y) return x / y end,
+    [17] = function(x, y) return x % y end,
+    [18] = function(x, y) return x ^ y end,
+    [19] = function(x, y) return x .. y end,
+}
+
+local function arith_fn(kind)
+    return ARITH[kind]
+end
+
+function closure_backend.build_block_chain(proto, block)
+    if proto.isvararg then
+        return nil, "vararg prototype"
+    end
+    local K = proto.consts
+    local ops = block.ops
+    local next_op = nil
+    for i = #ops, 1, -1 do
+        local ins = ops[i]
+        local op, a, b, c = ins.op, ins.a, ins.b, ins.c
+        local nxt = next_op
+        local handler
+        if op == 50 then -- NOP
+            handler = function(st) return nxt end
+        elseif op == 1 then -- LOADK
+            local k = K[a]
+            handler = function(st)
+                local top = st.top + 1
+                st.top = top
+                st.S[top] = k
+                return nxt
+            end
+        elseif op == 2 then -- LOADBOOL
+            local v = (a == 1)
+            handler = function(st)
+                local top = st.top + 1
+                st.top = top
+                st.S[top] = v
+                return nxt
+            end
+        elseif op == 3 then -- LOADNIL
+            local n = a
+            handler = function(st)
+                local top = st.top
+                for j = 1, n do
+                    top = top + 1
+                    st.S[top] = nil
+                end
+                st.top = top
+                return nxt
+            end
+        elseif op == 4 then -- GETLOCAL
+            local idx = a
+            handler = function(st)
+                local top = st.top + 1
+                st.top = top
+                st.S[top] = st.S[idx]
+                return nxt
+            end
+        elseif op == 5 then -- SETLOCAL
+            local idx = a
+            handler = function(st)
+                local top = st.top
+                st.S[idx] = st.S[top]
+                st.S[top] = nil
+                st.top = top - 1
+                return nxt
+            end
+        elseif op >= 13 and op <= 19 then -- binary arithmetic/concat
+            local fn = ({
+                [13] = function(x, y) return x + y end,
+                [14] = function(x, y) return x - y end,
+                [15] = function(x, y) return x * y end,
+                [16] = function(x, y) return x / y end,
+                [17] = function(x, y) return x % y end,
+                [18] = function(x, y) return x ^ y end,
+                [19] = function(x, y) return x .. y end,
+            })[op]
+            handler = function(st)
+                local top = st.top
+                local y = st.S[top]
+                local x = st.S[top - 1]
+                st.S[top] = nil
+                top = top - 1
+                st.S[top] = fn(x, y)
+                st.top = top
+                return nxt
+            end
+        elseif op == 20 then -- UNM
+            handler = function(st)
+                st.S[st.top] = -st.S[st.top]
+                return nxt
+            end
+        elseif op == 21 then -- NOT
+            handler = function(st)
+                st.S[st.top] = not st.S[st.top]
+                return nxt
+            end
+        elseif op == 22 then -- LEN
+            handler = function(st)
+                st.S[st.top] = #st.S[st.top]
+                return nxt
+            end
+        elseif op >= 58 and op <= 69 then -- arithmetic fusions
+            local rr = (op % 2 == 0)
+            local kind = 13 + math.floor((op - 58) / 2)
+            local fn = arith_fn(kind)
+            if not fn then
+                return nil, "unsupported opcode " .. tostring(op)
+            end
+            local x = a
+            local y = b
+            if rr then
+                handler = function(st)
+                    local top = st.top + 1
+                    st.top = top
+                    st.S[top] = fn(st.S[x], st.S[y])
+                    return nxt
+                end
+            else
+                local k = K[y]
+                handler = function(st)
+                    local top = st.top + 1
+                    st.top = top
+                    st.S[top] = fn(st.S[x], k)
+                    return nxt
+                end
+            end
+        elseif op == 167 then -- ASSIGN_TO_RR
+            local kind = proto.code[ins.pc + 4]
+            local fn = arith_fn(kind)
+            if not fn then
+                return nil, "unsupported arithmetic kind"
+            end
+            local dst, x, y = a, b, c
+            handler = function(st)
+                st.S[dst] = fn(st.S[x], st.S[y])
+                return nxt
+            end
+        elseif op == 168 then -- ASSIGN_TO_RK
+            local kind = proto.code[ins.pc + 4]
+            local fn = arith_fn(kind)
+            if not fn then
+                return nil, "unsupported arithmetic kind"
+            end
+            local dst, x, k = a, b, K[c]
+            handler = function(st)
+                st.S[dst] = fn(st.S[x], k)
+                return nxt
+            end
+        elseif op == 164 then -- PUSH_OP_RK
+            local kind = proto.code[ins.pc + 4]
+            local fn = arith_fn(kind)
+            if not fn then
+                return nil, "unsupported arithmetic kind"
+            end
+            local x = K[a]
+            local y = b
+            handler = function(st)
+                local top = st.top + 1
+                st.top = top
+                st.S[top] = fn(x, st.S[y])
+                return nxt
+            end
+        elseif op == 165 then -- PUSH_OP_RS
+            local kind = proto.code[ins.pc + 4]
+            local fn = arith_fn(kind)
+            if not fn then
+                return nil, "unsupported arithmetic kind"
+            end
+            local y = a
+            handler = function(st)
+                local top = st.top
+                st.S[top] = fn(st.S[top], st.S[y])
+                return nxt
+            end
+        elseif op == 166 then -- PUSH_OP_KS
+            local kind = proto.code[ins.pc + 4]
+            local fn = arith_fn(kind)
+            if not fn then
+                return nil, "unsupported arithmetic kind"
+            end
+            local k = K[a]
+            handler = function(st)
+                local top = st.top
+                st.S[top] = fn(st.S[top], k)
+                return nxt
+            end
+        elseif op == 34 then -- RET
+            local nret = a
+            if nret < 0 then
+                return nil, "open return"
+            end
+            handler = function(st)
+                local n = nret
+                local ret = {}
+                local src = st.top - n + 1
+                for j = 1, n do
+                    ret[j] = st.S[src + j - 1]
+                end
+                st.ret = ret
+                st.nret = n
+                return nil
+            end
+        else
+            return nil, "unsupported opcode " .. tostring(op)
+        end
+        next_op = handler
+    end
+    return next_op
+end
+
+function closure_backend.run_block_chain(proto, entry, ...)
+    local args = pack(...)
+    local S = {}
+    for i = 1, proto.numparams do
+        S[i] = args[i]
+    end
+    for i = proto.numparams + 1, proto.maxreg do
+        S[i] = nil
+    end
+    local st = { S = S, top = proto.maxreg, ret = nil, nret = 0 }
+    local op = entry
+    while op do
+        op = op(st)
+    end
+    if st.nret == 0 then
+        return
+    end
+    return unpack(st.ret, 1, st.nret)
+end
+
 return {
     DEFAULT_LIMITS = DEFAULT_LIMITS,
     FOP = FOP,
     closure_info = closure_info,
     make_closure = make_closure,
     run_closure = run_closure,
+    scan_block = closure_backend.scan_block,
+    build_block_chain = closure_backend.build_block_chain,
+    run_block_chain = closure_backend.run_block_chain,
 }

@@ -1,0 +1,150 @@
+# GoogiVM v2 — block-threaded closure VM
+
+Status: branch `gvm-closure-v2`, phase 0 (module boundary) complete.
+`main` remains the stable single-file VM.
+
+## Why a new backend
+
+The current VM is a fused register interpreter with a balanced range-tree
+dispatch. It is fast with LuaJIT disabled because one loop iteration can
+execute a complete superinstruction. A closure-threaded VM removes the central
+dispatch but pays a Lua call per operation, so the default must not be
+per-instruction closures.
+
+The v2 backend is therefore **block-threaded**:
+
+- basic blocks and fused superinstructions become Lua closures;
+- a trampoline runs the chain;
+- operand kinds are specialized at compile time (`K` constant, `R` register);
+- complex or not-yet-supported blocks fall back to the current interpreter.
+
+This keeps the fast path (JIT off) close to the existing VM while creating a
+structure the host JIT can inline.
+
+## Files
+
+| File | Responsibility |
+|---|---|
+| `gvm_compiler.lua` | lexer, parser, emitter, peephole optimizer, prototype builder |
+| `gvm_runtime.lua` | prototypes, closures, frames, cells, calls, operators, limits, tracebacks, v2 backend |
+| `custom_loadstring_full.lua` | public API, option validation, module loading |
+
+The public API is unchanged:
+
+```lua
+local custom_loadstring = dofile("custom_loadstring_full.lua")
+local chunk, err = custom_loadstring(source, env, options)
+```
+
+`dofile` is used only to load the two modules at startup. The interpreter still
+does not use `load`, `loadstring`, FFI, `debug`, `io`, or `os`.
+
+## Execution model
+
+```
+compile source
+  -> prototypes with code/lines/consts/updesc
+  -> optimize_code (existing fusions)
+  -> block plan (pc, slot lengths, successors)
+  -> lazy block closures
+  -> trampoline: while op do op = op(state) end
+```
+
+A block closure receives the VM state and returns the next closure (or `nil` to
+stop). It must not recurse through the host stack for guest calls; those use
+explicit frames and return a continuation.
+
+### Block contents
+
+A block ends at a jump target, branch, call, return, loop back-edge, or a hard
+instruction. The builder records the exact slot length of every instruction so
+fused instructions can be chained without decoding the whole stream at run time.
+
+### Operand specialization
+
+Handlers are selected by shape, not by a runtime type check:
+
+- `ADD_KK`, `ADD_RK`, `ADD_RR`;
+- `INDEX_RK`, `INDEX_RR`;
+- `CALL_RR1`, `CALL_RR2`;
+- compound assignment and loop variants.
+
+The first implementation may reuse the existing fused opcode numbers; the
+important part is that the shape is fixed when the closure is built.
+
+### Frames and calls
+
+- `state.S`, `state.top`, `state.frames`, `state.fi` mirror the current VM.
+- A guest call pushes a frame and returns the callee's entry closure.
+- A return pops the frame and resumes the caller's continuation.
+- Tail calls reuse the current frame.
+- Varargs, multiple returns, `pcall`/`xpcall`, `getfenv`/`setfenv`, metamethods,
+  cells and limits must behave exactly as in the current VM.
+
+### Fallback
+
+`proto.backend` selects `legacy` or `closure`. Until a block is supported,
+the prototype stays on `legacy`. There is no mixed execution inside one
+prototype in the first phase; that keeps error line mapping and limits simple.
+
+## Correctness invariants
+
+1. Do not fuse across a jump target; the existing optimizer rule still applies.
+2. The block builder must use the same slot lengths as `put()`: 2, 3, 4, 5, 6,
+   8, 9, 10, 12, 14, 18, 24 slots.
+3. Register collisions and captured-local checks must not be weakened.
+4. `CALLD` result counts, table tails, generic-for paths and tail-call flags
+   must keep their current meaning.
+5. A closure backend error must still produce `sourceName:line` and a Lua-style
+   traceback.
+6. The default environment remains empty.
+7. Every new path needs a regression test; do not remove existing checks.
+
+## Phases
+
+### Phase 0 — module boundary (done)
+
+- Split the stable VM into compiler/runtime modules.
+- Public entry loads modules through relative and `$CONTENT_DATA` paths.
+- Full suite: 18,737 LuaJIT / 18,713 Lua 5.4 checks.
+
+### Phase 1 — block plan and chain prototype
+
+- Record slot lengths during emission/optimization.
+- Build a block plan for a prototype.
+- Implement a closure chain for straight-line arithmetic/local/return blocks.
+- Opt in through an internal backend option; default remains `legacy`.
+- Add focused tests comparing both backends on the same chunks.
+
+### Phase 2 — branches and loops
+
+- Compile `JMP`, `JMPF`, `TESTF`, `TESTT`, `JMPNIL`, `FORPREP`, `FORLOOP`.
+- Return continuations instead of host recursion.
+- Preserve instruction budgets at block boundaries.
+- Add loop, `break`, `repeat`, numeric/generic-for tests.
+
+### Phase 3 — calls, closures and cells
+
+- `CALLD`, `CLOSURE`, `MARK`/`POP`/`PEEK`, `VARARG`, `SETLISTMULTI`.
+- Explicit frames, tail calls, varargs, multiple returns.
+- Captured locals and fresh-per-iteration loop cells.
+- `pcall`/`xpcall` and traceback tests.
+
+### Phase 4 — tables, operators and metamethods
+
+- `NEWTABLE`, `FIELD`/`INDEX`/`SETFIELD`/`SETINDEX`, `SELF`, `SETLIST`.
+- Full operator/metamethod behavior.
+- Table constructor and method-call tests.
+
+### Phase 5 — selection and benchmarks
+
+- Compare `legacy` and `closure` on the 16-task real suite and 50-case suite.
+- Select the backend per prototype only when it wins and is correct.
+- Keep a runtime switch for diagnosis.
+- Do not claim a speedup before measuring both hosts, with JIT on and off.
+
+## Non-goals
+
+- Native code generation inside pure Lua (requires FFI/executable memory).
+- Using host `loadstring` to generate optimized closures (violates constraints).
+- Copying FiOne/Fin code; their designs are reference material only.

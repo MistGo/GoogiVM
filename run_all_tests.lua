@@ -23,6 +23,7 @@ local modules = {
     "test_host_interop",
     "test_regressions",
     "test_superinstructions",
+    "test_v2_backend",
     "test_fuzz",
     "test_stress",
     "test_limits",

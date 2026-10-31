@@ -1,20 +1,25 @@
 # GoogiVM Technical Guide
 
-This document explains how **GoogiVM** (`custom_loadstring_full.lua`) compiles and executes Lua 5.1 source code. For public API usage and benchmarks, see [`README.md`](README.md).
+This document explains how **GoogiVM** compiles and executes Lua 5.1 source code. For public API usage and benchmarks, see [`README.md`](README.md).
+
+The implementation is split across three runtime files:
+
+- `custom_loadstring_full.lua` — public API and module loader;
+- `gvm_compiler.lua` — lexer, parser, emitter and optimizer;
+- `gvm_runtime.lua` — prototypes, frames, closures, legacy VM and the experimental closure slice.
 
 ---
 
 ## 1. Execution Pipeline
 
-Everything lives in a single file (`custom_loadstring_full.lua`) with five logical stages:
-
 ```text
 Lua 5.1 Source String
   -> 1. Streaming Lexer (`advance`, `read_number`, `read_string`)
   -> 2. Single-Pass Recursive-Descent Compiler (`parse_stmt`, `compile_expr`)
-  -> 3. Per-Function Bytecode Prototype (`code`, `consts`, `updesc`, `lines`)
+  -> 3. Per-Function Bytecode Prototype (`code`, `consts`, `updesc`, `lines`, `slotlen`)
   -> 4. Peephole Superinstruction Optimizer (`optimize_code`)
   -> 5. Explicit-Frame Stack/Register Virtual Machine (`run_closure`)
+  -> 6. Opt-in block-threaded closure slice (`build_block_chain`)
 ```
 
 There is no intermediate AST. Bytecode is emitted directly during parsing.
@@ -35,6 +40,7 @@ There is no intermediate AST. Bytecode is emitted directly during parsing.
 Each function (including the top-level chunk, which is compiled as an implicit `...` vararg function) has a compilation context `fc`:
 
 - `code` — flat 1-based numeric array; every base instruction occupies 4 numbers: `[OPCODE, A, B, C]`.
+- `slotlen` — exact span of each live instruction in 4-number units. `emit` writes 1; fused `put` writes 2, 3, 4, 5, 6, 8, 9, 10, 12, 14, 18 or 24. The closure builder rejects a missing entry.
 - `consts` / `cmap` — deduplicated constant pool (`K`).
 - `locals` — active local variable descriptors (`name`, `slot`, `captured`, `cell_pc`, `access`).
 - `upvals` — upvalue descriptors (`name`, `instack`, `idx`).
@@ -52,7 +58,7 @@ When a local variable is declared, the compiler emits a `NOP` placeholder (`cell
 
 ---
 
-## 4. Bytecode & Superinstructions (Opcodes 1–168)
+## 4. Bytecode & Superinstructions (Opcodes 1-208)
 
 ### Base Opcodes (`1–51`)
 
@@ -179,7 +185,30 @@ iteration, so a 600k-iteration tail-recursive loop eventually tripped
 
 ---
 
-## 6. Host-dependent semantics
+## 6. Experimental block-threaded closure slice
+
+`gvm_runtime.lua` exposes `scan_block`, `build_block_chain` and
+`run_block_chain`. They are the first vertical slice of the v2 backend described
+in [`GVM_V2_ARCHITECTURE.md`](GVM_V2_ARCHITECTURE.md).
+
+- `proto.slotlen` gives the exact span of every live instruction, including
+  fused instructions.
+- `scan_block` walks a straight-line block until a branch, call, loop edge or
+  return and returns the instruction descriptors.
+- `build_block_chain` turns supported stack arithmetic, locals, concatenation
+  and `RET` into a chain of Lua closures. Each closure returns the next one;
+  `run_block_chain` is the trampoline.
+- Unsupported instructions make the builder return `nil, err`, so the prototype
+  falls back to `run_closure`.
+
+The public option `backend = "closure"` is experimental. It only affects
+straight-line leaf functions; control flow, calls, tables, limits and
+source-line tracebacks are not implemented in the slice yet. Keep the default
+`backend = "legacy"` for production and untrusted code.
+
+---
+
+## 7. Host-dependent semantics
 
 GoogiVM implements the Lua 5.1 language itself; the following behaviors are
 inherited from the host and are intentionally not emulated:

@@ -4,7 +4,7 @@ Short operating guide for AI coding agents working on **GoogiVM**.
 
 ## What this project is
 
-A single-file Lua 5.1 compiler and bytecode interpreter written in pure Lua. It exists for hosts where `load`, `loadstring`, FFI, `debug`, `io`, and `os` are unavailable.
+A three-file Lua 5.1 compiler and bytecode interpreter written in pure Lua. It exists for hosts where `load`, `loadstring`, FFI, `debug`, `io`, and `os` are unavailable.
 
 Public API:
 
@@ -15,7 +15,7 @@ local chunk, err = custom_loadstring(source, env, options)
 
 - `source` must be a string.
 - `env` is optional; `nil` means a fresh empty table, **not** `_G`.
-- `options` is optional and may contain execution/compile limits and `sourceName`.
+- `options` is optional and may contain execution/compile limits, `sourceName`, and the experimental `backend = "closure"` switch.
 - Success returns a callable function.
 - Compile failure returns `nil, error_string`.
 - Runtime string errors propagate with `sourceName:line` and an interpreted trace; non-string error objects are preserved.
@@ -37,7 +37,10 @@ The test harness may use `loadstring`/`load`, `os.clock`, `print`, and `dofile`.
 
 | Path | Role |
 |---|---|
-| `custom_loadstring_full.lua` | Compiler + VM |
+| `custom_loadstring_full.lua` | Public API and module loader |
+| `gvm_compiler.lua` | Lexer, parser, emitter, optimizer, prototypes |
+| `gvm_runtime.lua` | Prototypes, closures, frames, VM, v2 closure slice |
+| `GVM_V2_ARCHITECTURE.md` | v2 block-threaded closure backend plan |
 | `run_all_tests.lua` | Test runner |
 | `tests/helpers.lua` | Shared test harness |
 | `tests/test_*.lua` | Test modules; `test_limits.lua` covers budgets and native-fenv rejection |
@@ -58,8 +61,8 @@ LuaJIT is the primary target. Lua 5.4 is a compatibility smoke run; some `setfen
 
 Expected baseline:
 
-- LuaJIT: 18,737 checks, 0 failed.
-- Lua 5.4: 18,713 checks, 0 failed.
+- LuaJIT: 18,795 checks, 0 failed.
+- Lua 5.4: 18,771 checks, 0 failed.
 
 If `luajit` is unavailable in the environment, run the Lua suite and report that the primary host was not tested.
 
@@ -69,17 +72,18 @@ For a longer explanation, read `TECHNICAL.md`.
 
 ```text
 source
-  -> integrated lexer/parser (no AST)
-  -> per-function bytecode prototype
+  -> gvm_compiler.lua: integrated lexer/parser (no AST)
+  -> per-function bytecode prototype + slot-length table
   -> linear peephole optimizer
-  -> native Lua closure + VM
+  -> gvm_runtime.lua: explicit-frame legacy VM
+  -> opt-in block-threaded closure slice
 ```
 
 Important details:
 
 - Instructions are stored as four numbers: `{OPCODE, A, B, C}`.
 - Normal opcodes are 1-51; fused opcodes are 52-208 (131 defined; 95-101, 104-109 and 120-131 were folded into `ASSIGN_*` and `JMPF_CMP_*`; 197 is an unused gap).
-- Fused instructions skip dead slots; the program counter can advance by 8, 12, 16, 20, 24, 32, 36, 40, 48, 56, 72, or 96 numbers.
+- Fused instructions skip dead slots; the program counter can advance by 8, 12, 16, 20, 24, 32, 36, 40, 48, 56, 72, or 96 numbers. Each live instruction also records its exact length in `proto.slotlen` so the closure builder does not guess.
 - The dispatch loop is a generated balanced range tree over the opcode number (leaves of at most four exact tests), not a linear `if/elseif` chain.
 - The optimizer does not shift code. It overwrites the first slot and marks the rest dead.
 - Captured locals become heap cells (`GETCELL`/`SETCELL`); loop variables can get a fresh cell per iteration.
@@ -90,6 +94,8 @@ Important details:
 ## Invariants
 
 Do not fuse across a jump target. `optimize_code` records targets for `JMP`, `JMPF`, `TESTF`, `TESTT`, `JMPNIL`, `FORPREP`, and `FORLOOP`; `can()` must guard every candidate.
+
+Every live instruction must have an entry in `proto.slotlen`. `emit` writes 1; every fused `put` writes its slot count. The closure block builder must reject a missing entry rather than infer a length.
 
 The fused skip length must match `put()`:
 

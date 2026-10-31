@@ -77,6 +77,14 @@ local function custom_loadstring(source, env, opts)
         sourceName = opts.sourceName
     end
 
+    local backend = "legacy"
+    if opts and opts.backend ~= nil then
+        if opts.backend ~= "legacy" and opts.backend ~= "closure" then
+            return nil, "option 'backend' must be 'legacy' or 'closure'"
+        end
+        backend = opts.backend
+    end
+
     local function compile()
         local len = #source
         local pos = 1
@@ -472,6 +480,7 @@ local function custom_loadstring(source, env, opts)
                 consts = {}, cmap = {}, kcount = 0,
                 locals = {}, nlocals = 0,
                 upvals = {},
+                slotlen = {},
                 nextreg = 0, maxreg = 0,
                 isvararg = isvararg, numparams = numparams,
                 loop_depth = 0, loop_breaks = {},
@@ -489,6 +498,7 @@ local function custom_loadstring(source, env, opts)
             co[i + 3] = c or 0
             fc.lines[i] = line_of(last_tp)
             fc.ncode = i + 3
+            fc.slotlen[i] = 1
             return i
         end
 
@@ -775,10 +785,13 @@ local function custom_loadstring(source, env, opts)
                 end
                 return true
             end
-            local function put(pos, op, a, b, c, len)                co[pos] = op
+            local function put(pos, op, a, b, c, len)
+                co[pos] = op
                 co[pos + 1] = a or 0
                 co[pos + 2] = b or 0
                 co[pos + 3] = c or 0
+                co.slotlen = co.slotlen or {}
+                co.slotlen[pos] = len
                 for i = 1, len - 1 do
                     dead[pos + i * 4] = true
                 end
@@ -2601,7 +2614,8 @@ local function custom_loadstring(source, env, opts)
             for i = 1, rawncode do
                 rawcode[i] = child.code[i]
             end
-            optimize_code(child.code, child.ncode)
+            child.code.slotlen = child.slotlen
+        optimize_code(child.code, child.ncode)
             if child.ncode > limits.maxCodeSlots then
                 error("code exceeds maxCodeSlots", 0)
             end
@@ -2651,6 +2665,7 @@ local function custom_loadstring(source, env, opts)
             local proto = {
                 code = child.code,
                 lines = child.lines,
+                slotlen = child.code.slotlen or child.slotlen,
                 consts = child.consts,
                 updesc = child.upvals,
                 numparams = child.numparams,
@@ -2660,6 +2675,7 @@ local function custom_loadstring(source, env, opts)
                 rawcode = rawcode,
                 rawncode = rawncode,
                 simple = simple,
+                backend = backend,
                 has_inline = child.has_inline,
                 inline_sites = child.inline_sites,
                 env = env,
@@ -3289,6 +3305,7 @@ local function custom_loadstring(source, env, opts)
             parse_stmt()
         end
         emit(RET, 0, 0, 0)
+        fc.code.slotlen = fc.slotlen
         optimize_code(fc.code, fc.ncode)
         if fc.ncode > limits.maxCodeSlots then
             error("code exceeds maxCodeSlots", 0)
@@ -3297,6 +3314,7 @@ local function custom_loadstring(source, env, opts)
         local proto = {
             code = fc.code,
             lines = fc.lines,
+            slotlen = fc.code.slotlen or fc.slotlen,
             consts = fc.consts,
             updesc = fc.upvals,
             numparams = 0,
@@ -3304,6 +3322,7 @@ local function custom_loadstring(source, env, opts)
             maxreg = fc.maxreg,
             env = env,
             sourceName = sourceName,
+            backend = backend,
             protos = all_protos,
             limits = limits,
         }
