@@ -128,12 +128,13 @@ prototype in the first phase; that keeps error line mapping and limits simple.
   opcodes; fused control-flow specialization is a later optimization.
 - Generic `for` needs calls/iterators and moves to phase 3.
 
-Measured with `benchmarks/bench_closure_backend.lua` under `luajit -joff`:
-the per-instruction chain is **1.96x faster** than legacy for a straight-line
-leaf call, but **0.29x** for a numeric-for sum. The chain is a proof of the
-continuation model, not yet a fast loop engine. Phase 5 must either build true
-per-block/superinstruction closures or restrict the backend to straight-line
-leaf functions and keep legacy for loops.
+Measured with `benchmarks/bench_closure_backend.lua` under `luajit -joff`
+after the block-closure change: a straight-line leaf call is about **1.8x**
+faster than legacy, and the recognized numeric-`for` sum (`acc = acc + i`) is
+about **1.9x** faster. The sum case uses a loop superinstruction closure; other
+loop bodies still pay per-block/per-op dispatch and may be slower. More loop
+shapes need their own superinstructions before the closure backend can be a
+general default.
 
 ### Phase 3 — calls, closures and cells
 

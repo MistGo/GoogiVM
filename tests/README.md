@@ -43,5 +43,5 @@ about behaviour.
 | `test_stress.lua` | 14 | 5,000-deep recursion, 150 locals, 1,000-element table constructors, 120 parameters, 100 return values, 100 KB strings |
 | `test_limits.lua` | 24 | `maxSourceBytes`, `maxCodeSlots`, `maxInstructions`, `maxCallDepth`, `maxStack`, `maxArgs`, `maxReturns`, native `getfenv`/`setfenv` rejection, source-line tracebacks |
 | `test_tailcalls.lua` | 21 | Frame-reusing tail calls (`return f(...)`), 600,000-step tail recursion under `maxCallDepth = 10` and the default `maxStack` (constant stack footprint), argument-order preservation, vararg/method/native tail calls |
-| `test_v2_backend.lua` | 90 | Opt-in closure chain: slot lengths, arithmetic/locals/concat/returns, branches, `while`/`repeat`/numeric `for`, `break`, comparisons, `and`/`or`, instruction budget and fallback |
+| `test_v2_backend.lua` | 90 | Opt-in block closure: slot lengths, arithmetic/locals/concat/returns, branches, `while`/`repeat`/numeric `for` (including the sum superinstruction), `break`, comparisons, `and`/`or`, instruction budget and fallback |
 | **Total** | **18,827** | **All modules pass with 0 failures** |

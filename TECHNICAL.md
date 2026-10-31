@@ -195,11 +195,16 @@ the v2 backend described in [`GVM_V2_ARCHITECTURE.md`](GVM_V2_ARCHITECTURE.md).
   fused instructions.
 - `scan_block` walks a block until a branch, call, loop edge or return and
   returns the instruction descriptors.
-- `build_block_chain` turns supported stack arithmetic, locals, comparisons,
-  branches, loops and `RET` into a chain of Lua closures. Each closure returns
-  the next one; `run_block_chain` is the trampoline.
+- `build_block_chain` is the per-instruction prototype: it turns supported
+  stack arithmetic, locals, comparisons, branches, loops and `RET` into a chain
+  of Lua closures.
+- `build_block_closure` is the actual block backend: one Lua call executes a
+  whole basic block through an internal dispatch, then returns the next block.
 - `build_program` discovers the reachable block graph and links the closures
-  through a shared entry table. `maxInstructions` is enforced per chain step.
+  through a shared entry table. It also recognizes the numeric-`for` sum shape
+  (`acc = acc + i`) and replaces the whole loop with one loop-superinstruction
+  closure. `maxInstructions` is enforced per block and per specialized-loop
+  iteration.
 - Unsupported instructions make the builder return `nil, err`, so the prototype
   falls back to `run_closure`.
 

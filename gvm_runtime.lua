@@ -3790,6 +3790,191 @@ function closure_backend.build_block_chain(proto, block, entries)
     return next_op
 end
 
+-- A true block closure: one Lua call executes the whole straight-line body
+-- with an internal dispatch, then returns the next block or stops.
+function closure_backend.build_block_closure(proto, block, entries, loop_info)
+    if proto.isvararg then
+        return nil, "vararg prototype"
+    end
+    local K = proto.consts
+    local ops = block.ops
+    local n = #ops
+    if n == 0 then
+        return nil, "empty block"
+    end
+    local term = ops[n]
+    local top_op = term.op
+    if not (top_op == 34 or top_op == 32 or top_op == 31 or
+            top_op == 29 or top_op == 30 or top_op == 51 or
+            top_op == 46 or top_op == 47) then
+        return nil, "unsupported terminator " .. tostring(top_op)
+    end
+    local body_n = n - 1
+    for i = 1, body_n do
+        local op = ops[i].op
+        local ok = op == 50 or op == 1 or op == 2 or op == 3 or op == 4 or
+            op == 5 or (op >= 13 and op <= 22) or (op >= 23 and op <= 28)
+        if not ok then
+            return nil, "unsupported block opcode " .. tostring(op)
+        end
+    end
+    if top_op == 34 and term.a < 0 then
+        return nil, "open return"
+    end
+
+    local function block_closure(st)
+        if st.max then
+            st.steps = st.steps + n
+            if st.steps > st.max then
+                error("instruction limit exceeded", 0)
+            end
+        end
+        local S = st.S
+        local top = st.top
+        local i = 1
+        while i <= body_n do
+            local ins = ops[i]
+            local op = ins.op
+            if op == 50 then
+                -- NOP
+            elseif op == 1 then
+                top = top + 1
+                S[top] = K[ins.a]
+            elseif op == 2 then
+                top = top + 1
+                S[top] = (ins.a == 1)
+            elseif op == 3 then
+                local count = ins.a
+                for j = 1, count do
+                    top = top + 1
+                    S[top] = nil
+                end
+            elseif op == 4 then
+                top = top + 1
+                S[top] = S[ins.a]
+            elseif op == 5 then
+                S[ins.a] = S[top]
+                S[top] = nil
+                top = top - 1
+            elseif op >= 13 and op <= 19 then
+                local b = S[top]
+                local a = S[top - 1]
+                S[top] = nil
+                top = top - 1
+                if op == 13 then S[top] = a + b
+                elseif op == 14 then S[top] = a - b
+                elseif op == 15 then S[top] = a * b
+                elseif op == 16 then S[top] = a / b
+                elseif op == 17 then S[top] = a % b
+                elseif op == 18 then S[top] = a ^ b
+                else S[top] = a .. b end
+            elseif op == 20 then
+                S[top] = -S[top]
+            elseif op == 21 then
+                S[top] = not S[top]
+            elseif op == 22 then
+                S[top] = #S[top]
+            else -- 23..28
+                local b = S[top]
+                local a = S[top - 1]
+                S[top] = nil
+                top = top - 1
+                S[top] = compare_op(op, a, b)
+            end
+            i = i + 1
+        end
+        st.top = top
+
+        local op = top_op
+        if op == 34 then
+            local nret = term.a
+            local ret = {}
+            local src = top - nret + 1
+            for j = 1, nret do
+                ret[j] = S[src + j - 1]
+            end
+            st.ret = ret
+            st.nret = nret
+            return nil
+        elseif op == 32 then
+            return entries[term.a]
+        elseif op == 31 then
+            local v = S[top]
+            S[top] = nil
+            st.top = top - 1
+            if not v then return entries[term.a] end
+            return entries[block.nextpc]
+        elseif op == 29 then
+            if not S[top] then return entries[term.a] end
+            S[top] = nil
+            st.top = top - 1
+            return entries[block.nextpc]
+        elseif op == 30 then
+            if S[top] then return entries[term.a] end
+            S[top] = nil
+            st.top = top - 1
+            return entries[block.nextpc]
+        elseif op == 51 then
+            local v = S[top]
+            S[top] = nil
+            st.top = top - 1
+            if v == nil then return entries[term.a] end
+            return entries[block.nextpc]
+        elseif op == 46 then
+            local r = term.a
+            local idx = tonumber(S[r])
+            local limit = tonumber(S[r + 1])
+            local step = tonumber(S[r + 2])
+            if not idx or not limit or not step then
+                error("'for' values must be numbers", 0)
+            end
+            S[r] = idx
+            S[r + 1] = limit
+            S[r + 2] = step
+            if step == 0 then
+                error("'for' step is zero", 0)
+            end
+            if (step > 0 and idx > limit) or
+               (step < 0 and idx < limit) then
+                return entries[term.b]
+            end
+            if loop_info then
+                local cost = loop_info.cost or 1
+                while true do
+                    if st.max then
+                        st.steps = st.steps + cost
+                        if st.steps > st.max then
+                            error("instruction limit exceeded", 0)
+                        end
+                    end
+                    S[r] = idx
+                    loop_info.body(S, idx)
+                    idx = idx + step
+                    if not ((step > 0 and idx <= limit) or
+                            (step < 0 and idx >= limit)) then
+                        break
+                    end
+                end
+                return entries[loop_info.exit]
+            end
+            return entries[block.nextpc]
+        else -- 47 FORLOOP
+            local r = term.a
+            local step = S[r + 2]
+            local limit = S[r + 1]
+            local idx = S[r] + step
+            if (step > 0 and idx <= limit) or
+               (step < 0 and idx >= limit) then
+                S[r] = idx
+                return entries[term.b]
+            end
+            return entries[block.nextpc]
+        end
+    end
+
+    return block_closure
+end
+
 function closure_backend.build_program(proto)
     if proto.isvararg then
         return nil, "vararg prototype"
@@ -3848,8 +4033,45 @@ function closure_backend.build_program(proto)
     if not ok then
         return nil, err
     end
+
+    -- Superinstruction fast path for `for i=1,n do acc=acc+i end`.
+    -- Header initialization still runs in the header block; the whole loop
+    -- body is then one direct closure instead of one block call per iteration.
+    local loop_infos = {}
     for start, block in pairs(blocks) do
-        local entry, berr = closure_backend.build_block_chain(proto, block, entries)
+        local term = block.ops[#block.ops]
+        local body = block.nextpc and blocks[block.nextpc]
+        if term.op == 46 and body then
+            local bt = body.ops[#body.ops]
+            local o = body.ops
+            if bt.op == 47 and bt.b == body.start and
+               body.nextpc == term.b and #o == 8 and
+               o[1].op == 4 and o[1].a == term.a and
+               o[2].op == 5 and
+               o[3].op == 50 and o[3].a == o[2].a and
+               o[4].op == 4 and
+               o[5].op == 4 and o[5].a == o[2].a and
+               o[6].op == 13 and
+               o[7].op == 5 and o[7].a == o[4].a then
+                local acc = o[4].a
+                local tmp = o[2].a
+                if acc ~= term.a and acc ~= term.a + 1 and
+                   acc ~= term.a + 2 and tmp ~= acc and tmp ~= term.a then
+                    loop_infos[start] = {
+                        exit = term.b,
+                        cost = 7,
+                        body = function(S, idx)
+                            S[acc] = S[acc] + idx
+                        end,
+                    }
+                end
+            end
+        end
+    end
+
+    for start, block in pairs(blocks) do
+        local entry, berr = closure_backend.build_block_closure(
+            proto, block, entries, loop_infos[start])
         if not entry then
             return nil, berr
         end
@@ -3867,18 +4089,12 @@ function closure_backend.run_block_chain(proto, entry, ...)
     for i = proto.numparams + 1, proto.maxreg do
         S[i] = nil
     end
-    local st = { S = S, top = proto.maxreg, ret = nil, nret = 0 }
     local max = proto.limits and proto.limits.maxInstructions
     if max == math.huge then max = nil end
-    local steps = 0
+    local st = { S = S, top = proto.maxreg, ret = nil, nret = 0,
+                 max = max, steps = 0 }
     local op = entry
     while op do
-        if max then
-            steps = steps + 1
-            if steps > max then
-                error("instruction limit exceeded", 0)
-            end
-        end
         op = op(st)
     end
     if st.nret == 0 then
