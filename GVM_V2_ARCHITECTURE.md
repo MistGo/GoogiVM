@@ -175,6 +175,11 @@ mode disables peephole fusions. The `acc = acc + i` loop superinstruction only
 covers one shape. Do not switch the default until more loop shapes are
 specialized and the total improves.
 
+Fused data opcodes are now supported behind `fused = true`:
+`MOVLOCAL`/`SETLOCAL_*`, arithmetic `58-69`, table `88-94`, construction
+`134-139`, assignments/swaps `154-157` and `PUSH_OP_*`/`ASSIGN_TO_*`.
+Fused branch/loop opcodes are the next group.
+
 ### Phase 5 - selection and benchmarks
 
 - Compare `legacy` and `closure` on the 16-task real suite and 50-case suite.

@@ -15,7 +15,7 @@ local chunk, err = custom_loadstring(source, env, options)
 
 - `source` must be a string.
 - `env` is optional; `nil` means a fresh empty table, **not** `_G`.
-- `options` is optional and may contain execution/compile limits, `sourceName`, and the experimental `backend = "closure"` switch.
+- `options` is optional and may contain execution/compile limits, `sourceName`, the experimental `backend = "closure"` switch, and `fused = true` for fused data opcodes.
 - Success returns a callable function.
 - Compile failure returns `nil, error_string`.
 - Runtime string errors propagate with `sourceName:line` and an interpreted trace; non-string error objects are preserved.
@@ -61,8 +61,8 @@ LuaJIT is the primary target. Lua 5.4 is a compatibility smoke run; some `setfen
 
 Expected baseline:
 
-- LuaJIT: 18,889 checks, 0 failed.
-- Lua 5.4: 18,865 checks, 0 failed.
+- LuaJIT: 18,893 checks, 0 failed.
+- Lua 5.4: 18,869 checks, 0 failed.
 
 If `luajit` is unavailable in the environment, run the Lua suite and report that the primary host was not tested.
 

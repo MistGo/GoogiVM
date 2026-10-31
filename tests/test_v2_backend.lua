@@ -404,6 +404,26 @@ return function(t)
         t:check(callmf()() == 7, "metamethod __call")
     end
 
+    -- Fused data opcodes in the chain backend.
+    local fused_src = "local function f(x) local t={a=1,[x]=2}; " ..
+        "return x*2+3,t.a,t[x] end; return f"
+    local fusedf, ferr = compile(fused_src, {},
+        { backend = "closure", fused = true })
+    t:check(fusedf ~= nil, "fused compile: " .. tostring(ferr))
+    if fusedf then
+        local f = fusedf()
+        local p = rt.closure_info[f][1]
+        local ce, cee = rt.build_program(p)
+        t:check(ce ~= nil, "fused chain: " .. tostring(cee))
+        local got = pack(f(5))
+        t:check(got[1] == 13 and got[2] == 1 and got[3] == 2,
+            "fused arithmetic/table opcodes")
+    end
+
+    local badfused, bferr = compile("return 1", {}, { fused = "yes" })
+    t:check(badfused == nil and tostring(bferr):find("fused") ~= nil,
+        "invalid fused option is rejected")
+
     local lim, lerr = compile(
         "local function f(x) local s=0; for i=1,x do s=s+i end; " ..
         "return s end; return f", {}, { backend = "closure", maxInstructions = 20 })

@@ -3862,6 +3862,10 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
         local ok = op == 50 or op == 1 or op == 2 or op == 3 or op == 4 or
             op == 5 or op == 6 or op == 7 or op == 8 or op == 9 or op == 10 or
             op == 11 or op == 12 or op == 35 or (op >= 36 and op <= 43) or
+            (op >= 52 and op <= 57) or
+            (op >= 58 and op <= 69) or (op >= 88 and op <= 94) or
+            (op >= 134 and op <= 139) or (op >= 154 and op <= 157) or
+            (op >= 164 and op <= 168) or
             op == 44 or op == 45 or op == 48 or op == 49 or
             (op >= 13 and op <= 22) or (op >= 23 and op <= 28)
         if not ok then
@@ -4031,6 +4035,94 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
                 elseif op == 17 then S[top] = a % b
                 elseif op == 18 then S[top] = a ^ b
                 else S[top] = a .. b end
+            elseif op >= 52 and op <= 57 then -- fused local moves
+                if op == 52 or op == 53 then
+                    S[ins.a] = S[ins.b]
+                elseif op == 54 then
+                    S[ins.a] = { v = S[ins.b] }
+                elseif op == 55 then
+                    S[ins.a] = K[ins.b]
+                elseif op == 56 then
+                    S[ins.a] = S[ins.b][S[ins.c]]
+                else
+                    S[ins.a] = S[ins.b][K[ins.c]]
+                end
+            elseif op >= 58 and op <= 69 then -- fused stack arithmetic
+                local rr = (op % 2 == 0)
+                local kind = 13 + math.floor((op - 58) / 2)
+                local fn = arith_fn(kind)
+                if rr then
+                    top = top + 1
+                    S[top] = fn(S[ins.a], S[ins.b])
+                else
+                    top = top + 1
+                    S[top] = fn(S[ins.a], K[ins.b])
+                end
+            elseif op == 164 then -- PUSH_OP_RK
+                local kind = proto.code[ins.pc + 4]
+                top = top + 1
+                S[top] = arith_fn(kind)(K[ins.a], S[ins.b])
+            elseif op == 165 then -- PUSH_OP_RS
+                local kind = proto.code[ins.pc + 4]
+                S[top] = arith_fn(kind)(S[top], S[ins.a])
+            elseif op == 166 then -- PUSH_OP_KS
+                local kind = proto.code[ins.pc + 4]
+                S[top] = arith_fn(kind)(S[top], K[ins.a])
+            elseif op == 167 then -- ASSIGN_TO_RR
+                local kind = proto.code[ins.pc + 4]
+                S[ins.a] = arith_fn(kind)(S[ins.b], S[ins.c])
+            elseif op == 168 then -- ASSIGN_TO_RK
+                local kind = proto.code[ins.pc + 4]
+                S[ins.a] = arith_fn(kind)(S[ins.b], K[ins.c])
+            elseif op >= 154 and op <= 157 then -- fused assignments/swaps
+                if op == 154 then
+                    local kind = proto.code[ins.pc + 4]
+                    S[ins.a] = arith_fn(kind)(S[ins.a], S[ins.b])
+                elseif op == 155 then
+                    local kind = proto.code[ins.pc + 4]
+                    S[ins.a] = arith_fn(kind)(S[ins.a], K[ins.b])
+                elseif op == 156 then
+                    local kind = proto.code[ins.pc + 4]
+                    S[ins.a] = arith_fn(kind)(S[ins.a], S[ins.b][S[ins.c]])
+                else
+                    local tmp = S[ins.a]
+                    S[ins.a] = S[ins.b]
+                    S[ins.b] = tmp
+                end
+            elseif op >= 134 and op <= 139 then -- fused table construction
+                if op == 134 then
+                    S[ins.a] = {}
+                elseif op == 135 then
+                    S[ins.a][ins.b] = S[ins.c]
+                elseif op == 136 then
+                    S[ins.a][ins.b] = K[ins.c]
+                elseif op == 137 then
+                    S[ins.a][ins.b] = S[ins.c] + K[proto.code[ins.pc + 9]]
+                elseif op == 138 then
+                    local t = { [K[ins.a]] = S[ins.b] }
+                    if ins.c > 0 then S[ins.c] = t
+                    else top = top + 1; S[top] = t end
+                else
+                    local t = { [K[ins.a]] = K[ins.b] }
+                    if ins.c > 0 then S[ins.c] = t
+                    else top = top + 1; S[top] = t end
+                end
+            elseif op >= 88 and op <= 94 then -- fused table access
+                if op == 88 then
+                    top = top + 1
+                    S[top] = S[ins.a][S[ins.b]]
+                elseif op == 89 or op == 90 then
+                    top = top + 1
+                    S[top] = S[ins.a][K[ins.b]]
+                elseif op == 91 then
+                    S[ins.a][S[ins.b]] = S[ins.c]
+                elseif op == 92 then
+                    S[ins.a][S[ins.b]] = K[ins.c]
+                elseif op == 93 then
+                    S[ins.a][K[ins.b]] = S[ins.c]
+                else
+                    S[ins.a][K[ins.b]] = K[ins.c]
+                end
             elseif op == 20 then
                 S[top] = -S[top]
             elseif op == 21 then

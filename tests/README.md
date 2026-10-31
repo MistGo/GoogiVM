@@ -11,12 +11,12 @@ luajit run_all_tests.lua
 lua run_all_tests.lua
 ```
 
-- **LuaJIT 2.1.1720049189 (primary target):** `18,889 checks, 0 failed`
-- **Lua 5.4.6 (compatibility target):** `18,865 checks, 0 failed` (24 checks that depend on Lua 5.1 `getfenv`/`setfenv` or LuaJIT `__len` table semantics are skipped automatically when those features are absent).
+- **LuaJIT 2.1.1720049189 (primary target):** `18,893 checks, 0 failed`
+- **Lua 5.4.6 (compatibility target):** `18,869 checks, 0 failed` (24 checks that depend on Lua 5.1 `getfenv`/`setfenv` or LuaJIT `__len` table semantics are skipped automatically when those features are absent).
 
-Of the 18,889 LuaJIT checks, **18,000 (95.6%) are differential fuzz
+Of the 18,893 LuaJIT checks, **18,000 (95.6%) are differential fuzz
 generations** from `test_fuzz.lua` (15,000 expressions + 3,000 programs); the
-remaining ~889 are hand-written assertions across the other 17 modules. The
+remaining ~893 are hand-written assertions across the other 17 modules. The
 headline number therefore measures fuzz volume, not 18k independent claims
 about behaviour.
 
@@ -43,5 +43,5 @@ about behaviour.
 | `test_stress.lua` | 14 | 5,000-deep recursion, 150 locals, 1,000-element table constructors, 120 parameters, 100 return values, 100 KB strings |
 | `test_limits.lua` | 24 | `maxSourceBytes`, `maxCodeSlots`, `maxInstructions`, `maxCallDepth`, `maxStack`, `maxArgs`, `maxReturns`, native `getfenv`/`setfenv` rejection, source-line tracebacks |
 | `test_tailcalls.lua` | 21 | Frame-reusing tail calls (`return f(...)`), 600,000-step tail recursion under `maxCallDepth = 10` and the default `maxStack` (constant stack footprint), argument-order preservation, vararg/method/native tail calls |
-| `test_v2_backend.lua` | 152 | Opt-in block closure: slot lengths, arithmetic/locals/concat/returns, branches, `while`/`repeat`/numeric `for` (including the sum superinstruction), `break`, comparisons, `and`/`or`, native/interpreted calls, multiple returns, closures/upvalues/cells, tables/SELF, globals, generic `for`, instruction/args/returns/stack/call-depth budgets, explicit frames, tracebacks, metamethods and fallback |
-| **Total** | **18,889** | **All modules pass with 0 failures** |
+| `test_v2_backend.lua` | 156 | Opt-in block closure: slot lengths, arithmetic/locals/concat/returns, branches, `while`/`repeat`/numeric `for` (including the sum superinstruction), `break`, comparisons, `and`/`or`, native/interpreted calls, multiple returns, closures/upvalues/cells, tables/SELF, globals, generic `for`, instruction/args/returns/stack/call-depth budgets, explicit frames, tracebacks, metamethods, fused data opcodes and fallback |
+| **Total** | **18,893** | **All modules pass with 0 failures** |

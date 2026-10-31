@@ -84,6 +84,14 @@ local function custom_loadstring(source, env, opts)
         end
         backend = opts.backend
     end
+    local fused = false
+    if opts and opts.fused ~= nil then
+        if type(opts.fused) ~= "boolean" then
+            return nil, "option 'fused' must be a boolean"
+        end
+        fused = opts.fused
+    end
+    local skip_fusions = backend == "closure" and not fused
 
     local function compile()
         local len = #source
@@ -2616,7 +2624,7 @@ local function custom_loadstring(source, env, opts)
                 rawcode[i] = child.code[i]
             end
             child.code.slotlen = child.slotlen
-        optimize_code(child.code, child.ncode, backend == "closure")
+        optimize_code(child.code, child.ncode, skip_fusions)
             if child.ncode > limits.maxCodeSlots then
                 error("code exceeds maxCodeSlots", 0)
             end
@@ -3307,7 +3315,7 @@ local function custom_loadstring(source, env, opts)
         end
         emit(RET, 0, 0, 0)
         fc.code.slotlen = fc.slotlen
-        optimize_code(fc.code, fc.ncode, backend == "closure")
+        optimize_code(fc.code, fc.ncode, skip_fusions)
         if fc.ncode > limits.maxCodeSlots then
             error("code exceeds maxCodeSlots", 0)
         end

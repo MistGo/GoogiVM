@@ -218,8 +218,10 @@ table construction/reads/writes, `SELF`, varargs/open returns, globals and
 generic `for` (through `CALLD`/`MARK`/`JMPNIL`) are also handled.
 `maxInstructions`, `maxArgs`, `maxReturns`, `maxStack` and `maxCallDepth` are
 enforced; runtime errors get a source-located traceback. Guest `pcall`/`xpcall`
-and fresh loop cells work. Fused opcodes are still disabled in this mode, and
-broader metamethod/edge-case coverage is still being filled in. Keep the
+and fresh loop cells work. `fused = true` enables the data-opcode subset
+(`MOVLOCAL`, arithmetic, table reads/writes, assignments, `PUSH_OP_*`); fused
+control-flow/loop opcodes still fall back. Broader metamethod/edge-case
+coverage is still being filled in. Keep the
 default `backend = "legacy"` for production and untrusted code.
 
 ---
