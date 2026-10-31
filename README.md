@@ -151,7 +151,7 @@ All limits are enabled by default and can be customized per chunk or disabled in
 | `maxArgs` | `1,000` | Maximum arguments passed to a function call. |
 | `maxReturns` | `1,000` | Maximum return values produced by a function return or vararg expansion. |
 
-`backend` is an experimental non-limit option. `"legacy"` (the default) uses the fused range-tree interpreter. `"closure"` builds the block-threaded closure slice for supported leaf functions, including branches, numeric `for`, `while` and `repeat`, and falls back to `legacy` for everything else. The closure slice does not yet implement calls, closures/upvalues, tables, stack/return limits, or source-line tracebacks; do not use it for untrusted code. It also disables peephole fusions for the selected chunk, so it is a correctness prototype, not the default fast path.
+`backend` is an experimental non-limit option. `"legacy"` (the default) uses the fused range-tree interpreter. `"closure"` builds the block-threaded closure slice for supported leaf functions, including branches, numeric `for`, `while` and `repeat`, and falls back to `legacy` for everything else. The closure slice does not yet implement calls, closures/upvalues, tables, stack/return limits, or source-line tracebacks; do not use it for untrusted code. It also disables peephole fusions for the selected chunk, so it is a correctness prototype, not the default fast path. Straight-line leaf calls are faster in the current slice, but loops are significantly slower; see `benchmarks/bench_closure_backend.lua`.
 
 ---
 

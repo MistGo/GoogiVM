@@ -128,6 +128,13 @@ prototype in the first phase; that keeps error line mapping and limits simple.
   opcodes; fused control-flow specialization is a later optimization.
 - Generic `for` needs calls/iterators and moves to phase 3.
 
+Measured with `benchmarks/bench_closure_backend.lua` under `luajit -joff`:
+the per-instruction chain is **1.96x faster** than legacy for a straight-line
+leaf call, but **0.29x** for a numeric-for sum. The chain is a proof of the
+continuation model, not yet a fast loop engine. Phase 5 must either build true
+per-block/superinstruction closures or restrict the backend to straight-line
+leaf functions and keep legacy for loops.
+
 ### Phase 3 — calls, closures and cells
 
 - `CALLD`, `CLOSURE`, `MARK`/`POP`/`PEEK`, `VARARG`, `SETLISTMULTI`.
