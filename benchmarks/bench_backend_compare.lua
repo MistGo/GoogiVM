@@ -34,19 +34,25 @@ local function make_env()
     }
 end
 
-for _, backend in ipairs({ "legacy", "closure" }) do
+for _, mode in ipairs({
+    { "legacy", false },
+    { "closure", false },
+    { "closure-fused", true },
+}) do
+    local backend = mode[1] == "closure-fused" and "closure" or mode[1]
     local chunk, err = custom(src, make_env(), {
         backend = backend,
+        fused = mode[2],
         sourceName = "benchreal.lua",
         maxInstructions = math.huge,
     })
     if not chunk then
-        print("COMPILE ERROR", backend, err)
+        print("COMPILE ERROR", mode[1], err)
     else
         local t0 = os.clock()
         local ok, rerr = pcall(chunk)
         local dt = os.clock() - t0
         print(string.format("BACKEND %s total %.4f s ok=%s err=%s",
-            backend, dt, tostring(ok), tostring(rerr)))
+            mode[1], dt, tostring(ok), tostring(rerr)))
     end
 end

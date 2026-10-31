@@ -219,9 +219,10 @@ generic `for` (through `CALLD`/`MARK`/`JMPNIL`) are also handled.
 `maxInstructions`, `maxArgs`, `maxReturns`, `maxStack` and `maxCallDepth` are
 enforced; runtime errors get a source-located traceback. Guest `pcall`/`xpcall`
 and fresh loop cells work. `fused = true` enables the data-opcode subset
-(`MOVLOCAL`, arithmetic, table reads/writes, assignments, `PUSH_OP_*`); fused
-control-flow/loop opcodes still fall back. Broader metamethod/edge-case
-coverage is still being filled in. Keep the
+(`MOVLOCAL`, arithmetic, table reads/writes, assignments, `PUSH_OP_*`) and
+the fused numeric-`for` terminators `112-118`; fused branch/control-flow
+opcodes still fall back. Broader metamethod/edge-case coverage is still being
+filled in. Keep the
 default `backend = "legacy"` for production and untrusted code.
 
 ---

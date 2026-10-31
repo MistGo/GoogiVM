@@ -3433,6 +3433,20 @@ run_closure = function(fn, trace, ...)
         end
     end
 end
+local FUSED_TERM = {
+    [102] = true, [103] = true,
+    [110] = true, [111] = true, [112] = true, [113] = true,
+    [114] = true, [115] = true, [116] = true, [117] = true,
+    [118] = true, [119] = true, [142] = true, [145] = true,
+    [146] = true, [147] = true, [148] = true, [149] = true,
+    [150] = true, [151] = true, [152] = true, [153] = true,
+    [169] = true, [170] = true, [171] = true, [172] = true,
+    [173] = true, [174] = true, [175] = true, [176] = true,
+    [177] = true, [178] = true, [179] = true, [180] = true,
+    [200] = true, [202] = true, [204] = true, [206] = true,
+    [208] = true,
+}
+
 -- v2 groundwork: walk one linear block using the compiler's slot lengths.
 -- The current optimizer already knows the exact span of every instruction;
 -- the closure backend must not guess it from the opcode number.
@@ -3456,6 +3470,17 @@ function closure_backend.scan_block(proto, start)
             return nil, "missing slot length at pc " .. tostring(pc)
         end
         local op = code[pc]
+        if FUSED_TERM[op] and pc ~= start then
+            -- A fused terminator is its own block. The preceding body ends
+            -- before it and falls through to that block.
+            return {
+                start = start,
+                finish = pc - 4,
+                nextpc = pc,
+                split = true,
+                ops = ops,
+            }
+        end
         ops[#ops + 1] = {
             pc = pc,
             op = op,
@@ -3467,7 +3492,8 @@ function closure_backend.scan_block(proto, start)
         local nextpc = pc + slots * 4
         -- RET, JMP, JMPF, TESTF, TESTT, CALLD, FORPREP, FORLOOP, JMPNIL.
         if op == 34 or op == 32 or op == 31 or op == 29 or op == 30 or
-           op == 33 or op == 46 or op == 47 or op == 51 then
+           op == 33 or op == 46 or op == 47 or op == 51 or
+           FUSED_TERM[op] then
             return {
                 start = start,
                 finish = pc,
@@ -3849,14 +3875,16 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
     if n == 0 then
         return nil, "empty block"
     end
-    local term = ops[n]
-    local top_op = term.op
-    if not (top_op == 34 or top_op == 32 or top_op == 31 or
+    local split = block.split
+    local term = (not split) and ops[n] or nil
+    local top_op = term and term.op or nil
+    if not split and not (top_op == 34 or top_op == 32 or top_op == 31 or
             top_op == 29 or top_op == 30 or top_op == 51 or
-            top_op == 46 or top_op == 47 or top_op == 33) then
+            top_op == 46 or top_op == 47 or top_op == 33 or
+            (top_op >= 112 and top_op <= 118)) then
         return nil, "unsupported terminator " .. tostring(top_op)
     end
-    local body_n = n - 1
+    local body_n = split and n or (n - 1)
     for i = 1, body_n do
         local op = ops[i].op
         local ok = op == 50 or op == 1 or op == 2 or op == 3 or op == 4 or
@@ -4142,6 +4170,9 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
         if st.limits.maxStack and top > st.limits.maxStack then
             error("stack limit exceeded", 0)
         end
+        if split then
+            return entries[block.nextpc]
+        end
 
         local op = top_op
         if op == 34 then
@@ -4304,6 +4335,49 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
                 return entries[loop_info.exit]
             end
             return entries[block.nextpc]
+        elseif op >= 112 and op <= 118 then
+            local r = term.a
+            local step = S[r + 2]
+            local limit = S[r + 1]
+            local idx = S[r] + step
+            if (step > 0 and idx <= limit) or
+               (step < 0 and idx >= limit) then
+                S[r] = idx
+                S[term.b] = idx
+                local body = term.c
+                if op == 112 then
+                    local a = proto.code[body + 13]
+                    local b = proto.code[body + 14]
+                    S[a] = S[a] + S[b]
+                elseif op == 113 then
+                    local a = proto.code[body + 13]
+                    S[a] = S[a] + K[proto.code[body + 14]]
+                elseif op == 114 then
+                    local a = proto.code[body + 13]
+                    local t = S[proto.code[body + 14]]
+                    local k = S[proto.code[body + 15]]
+                    S[a] = S[a] + t[k]
+                elseif op == 115 then
+                    local t = S[proto.code[body + 13]]
+                    local k = S[proto.code[body + 14]]
+                    t[k] = S[proto.code[body + 15]]
+                elseif op == 116 then
+                    local t = S[proto.code[body + 13]]
+                    local k = S[proto.code[body + 14]]
+                    t[k] = K[proto.code[body + 15]]
+                elseif op == 117 then
+                    local a = proto.code[body + 13]
+                    local b = proto.code[body + 14]
+                    S[a] = S[a] - S[b]
+                else
+                    local a = proto.code[body + 13]
+                    S[a] = S[a] - K[proto.code[body + 14]]
+                end
+                local nxt = (op >= 114 and op <= 116) and
+                    (body + 36) or (body + 28)
+                return entries[nxt]
+            end
+            return entries[block.nextpc]
         else -- 47 FORLOOP
             local r = term.a
             local step = S[r + 2]
@@ -4349,7 +4423,9 @@ function closure_backend.build_program(proto)
             return true
         end
         local ok, e = true, nil
-        if op == 34 then
+        if block.split then
+            ok, e = need(block.nextpc)
+        elseif op == 34 then
             -- return
         elseif op == 32 then
             ok, e = need(term.a)
@@ -4358,6 +4434,14 @@ function closure_backend.build_program(proto)
             if ok then ok, e = need(block.nextpc) end
         elseif op == 46 or op == 47 then
             ok, e = need(term.b)
+            if ok then ok, e = need(block.nextpc) end
+        elseif op >= 112 and op <= 118 then
+            local nxt = (op >= 114 and op <= 116) and
+                (term.c + 36) or (term.c + 28)
+            ok, e = need(nxt)
+            if ok then ok, e = need(block.nextpc) end
+        elseif op == 110 or op == 111 then
+            ok, e = need(term.c)
             if ok then ok, e = need(block.nextpc) end
         elseif op == 33 then
             if term.c ~= 1 then

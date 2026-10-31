@@ -420,6 +420,19 @@ return function(t)
             "fused arithmetic/table opcodes")
     end
 
+    local fused_loop_src = "local function f(x) local t={}; local s=0; " ..
+        "for i=1,x do t[i]=i; s=s+t[i] end; return s end; return f"
+    local flf, flerr = compile(fused_loop_src, {},
+        { backend = "closure", fused = true })
+    t:check(flf ~= nil, "fused loop compile: " .. tostring(flerr))
+    if flf then
+        local f = flf()
+        local p = rt.closure_info[f][1]
+        local ce, cee = rt.build_program(p)
+        t:check(ce ~= nil, "fused loop chain: " .. tostring(cee))
+        t:check(f(5) == 15, "fused table/sum loop")
+    end
+
     local badfused, bferr = compile("return 1", {}, { fused = "yes" })
     t:check(badfused == nil and tostring(bferr):find("fused") ~= nil,
         "invalid fused option is rejected")

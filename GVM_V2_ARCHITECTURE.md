@@ -163,22 +163,23 @@ general default.
 `benchmarks/bench_backend_compare.lua` runs `benchmarks/benchreal.lua` through
 both backends.
 
-| Host mode | Legacy | Closure | Closure / legacy |
-|---|---:|---:|---:|
-| `luajit -joff` | 3.86 s | 14.77 s | **0.26x** |
-| `luajit` | 1.42 s | 7.19 s | **0.20x** |
+| Host mode | Legacy | Closure | Closure-fused | Fused / legacy |
+|---|---:|---:|---:|---:|
+| `luajit -joff` | 4.00 s | 15.31 s | **4.60 s** | **0.87x** |
+| `luajit` | 1.40 s | 7.27 s | **1.75 s** | **0.80x** |
 
-All 16 tasks returned the correct result under both backends. The closure
-backend is therefore **semantically validated** on the real suite, but it is
-still much slower overall: general loop bodies pay per-block dispatch and the
-mode disables peephole fusions. The `acc = acc + i` loop superinstruction only
-covers one shape. Do not switch the default until more loop shapes are
-specialized and the total improves.
+All 16 tasks returned the correct result in all three modes. Fused data and
+numeric-`for` opcodes close most of the gap: most individual tasks are at
+0.95-1.05x. The remaining regression is concentrated in `spectral-norm`
+(about 0.64x under `-joff`), with smaller losses in `queens` and `oop`. Do not
+switch the default yet; finish fused branch/control-flow opcodes and profile
+the remaining hotspots.
 
-Fused data opcodes are now supported behind `fused = true`:
-`MOVLOCAL`/`SETLOCAL_*`, arithmetic `58-69`, table `88-94`, construction
-`134-139`, assignments/swaps `154-157` and `PUSH_OP_*`/`ASSIGN_TO_*`.
-Fused branch/loop opcodes are the next group.
+Fused data opcodes and numeric-`for` opcodes `112-118` are now supported behind
+`fused = true`: `MOVLOCAL`/`SETLOCAL_*`, arithmetic `58-69`, table `88-94`,
+construction `134-139`, assignments/swaps `154-157`,
+`PUSH_OP_*`/`ASSIGN_TO_*`, and the fused loop terminators. Fused branch
+`JMPF`/`JMPT` fusions are the next group.
 
 ### Phase 5 - selection and benchmarks
 
