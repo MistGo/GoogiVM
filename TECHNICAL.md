@@ -214,10 +214,10 @@ opcodes, and it supports `if`/`while`/`repeat`/numeric `for`/`break` for leaf
 functions. `CALLD` is handled for native and interpreted targets, including
 tail calls, result adjustment and multiple returns, but through host recursion
 rather than explicit VM frames. `CLOSURE`, upvalues, heap cells, table
-construction/reads/writes, `SELF`, varargs and open returns are also handled.
-Stack/call-depth limits and source-line tracebacks are not implemented in the
-slice yet. Keep the default `backend = "legacy"` for production and untrusted
-code.
+construction/reads/writes, `SELF`, varargs/open returns, globals and generic
+`for` (through `CALLD`/`MARK`/`JMPNIL`) are also handled. Stack/call-depth
+limits and source-line tracebacks are not implemented in the slice yet. Keep
+the default `backend = "legacy"` for production and untrusted code.
 
 ---
 

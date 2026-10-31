@@ -198,6 +198,48 @@ return function(t)
         t:check(got[1] == 1 and got[2] == 2, "table multi-return tail")
     end
 
+    -- Globals and generic for.
+    local genv = { x = 1 }
+    local gf, gerr = compile(
+        "local function f() x=x+1; return x end; return f",
+        genv, { backend = "closure" })
+    t:check(gf ~= nil, "global compile: " .. tostring(gerr))
+    if gf then
+        local f = gf()
+        local p = rt.closure_info[f][1]
+        local ce, cee = rt.build_program(p)
+        t:check(ce ~= nil, "global chain: " .. tostring(cee))
+        t:check(f() == 2 and genv.x == 2, "global read/write")
+    end
+
+    local mathf, merr = compile(
+        "local function f() return math.sqrt(9) end; return f",
+        { math = math }, { backend = "closure" })
+    t:check(mathf ~= nil, "global field compile: " .. tostring(merr))
+    if mathf then
+        t:check(mathf()() == 3, "global field call")
+    end
+
+    local pairsf, perr = compile(
+        "local function f(t) local s=0; for k,v in pairs(t) do s=s+v end; " ..
+        "return s end; return f", { pairs = pairs }, { backend = "closure" })
+    t:check(pairsf ~= nil, "pairs compile: " .. tostring(perr))
+    if pairsf then
+        local f = pairsf()
+        local p = rt.closure_info[f][1]
+        local ce, cee = rt.build_program(p)
+        t:check(ce ~= nil, "pairs chain: " .. tostring(cee))
+        t:check(f({ a = 1, b = 2, c = 3 }) == 6, "pairs sum")
+    end
+
+    local ipairsf, ierr = compile(
+        "local function f(t) local s=0; for i,v in ipairs(t) do s=s+v end; " ..
+        "return s end; return f", { ipairs = ipairs }, { backend = "closure" })
+    t:check(ipairsf ~= nil, "ipairs compile: " .. tostring(ierr))
+    if ipairsf then
+        t:check(ipairsf()({ 1, 2, 3 }) == 6, "ipairs sum")
+    end
+
     -- Varargs in returns, parameter adjustment and table tails.
     local vararg_src = "local function f(a,...) return a,... end; return f"
     local vf, verr = compile(vararg_src, {}, { backend = "closure" })

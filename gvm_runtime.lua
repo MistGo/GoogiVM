@@ -3811,7 +3811,7 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
         local op = ops[i].op
         local ok = op == 50 or op == 1 or op == 2 or op == 3 or op == 4 or
             op == 5 or op == 6 or op == 7 or op == 8 or op == 9 or op == 10 or
-            op == 35 or (op >= 36 and op <= 43) or
+            op == 11 or op == 12 or op == 35 or (op >= 36 and op <= 43) or
             op == 44 or op == 45 or op == 48 or op == 49 or
             (op >= 13 and op <= 22) or (op >= 23 and op <= 28)
         if not ok then
@@ -3868,6 +3868,13 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
                 S[top] = st.ups[ins.a + 4].v
             elseif op == 10 then -- SETUPVAL
                 st.ups[ins.a + 4].v = S[top]
+                S[top] = nil
+                top = top - 1
+            elseif op == 11 then -- GETGLOBAL
+                top = top + 1
+                S[top] = st.env[K[ins.a]]
+            elseif op == 12 then -- SETGLOBAL
+                st.env[K[ins.a]] = S[top]
                 S[top] = nil
                 top = top - 1
             elseif op == 48 then -- CLOSURE

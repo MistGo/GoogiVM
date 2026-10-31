@@ -144,6 +144,7 @@ general default.
 - Calls currently use host recursion; explicit frame suspension and
   `maxCallDepth` are still pending.
 - `VARARG`, open returns and vararg table tails are implemented.
+- Globals and generic `for` work through `CALLD`/`MARK`/`JMPNIL`.
 - Fresh-per-iteration loop cells with captured variables are still pending.
 - `pcall`/`xpcall` and traceback tests are still pending.
 
