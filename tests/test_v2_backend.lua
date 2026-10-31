@@ -63,6 +63,65 @@ return function(t)
     local entry = block and rt.build_block_chain(proto, block)
     t:check(entry == nil, "branching block must not build a chain")
 
+    -- Control flow: branches, loops and the instruction budget.
+    local control = {
+        { "if-true",
+          "local function f(x) if x then return 1 else return 2 end end; return f",
+          true, 1 },
+        { "if-false",
+          "local function f(x) if x then return 1 else return 2 end end; return f",
+          false, 2 },
+        { "while",
+          "local function f(x) local s=0; while s < x do s=s+1 end; return s end; return f",
+          5, 5 },
+        { "repeat",
+          "local function f(x) local s=0; repeat s=s+1 until s>=x; return s end; return f",
+          5, 5 },
+        { "numeric-for",
+          "local function f(x) local s=0; for i=1,x do s=s+i end; return s end; return f",
+          5, 15 },
+        { "for-if",
+          "local function f(x) local s=0; for i=1,x do if i%2==0 then s=s+i end end; return s end; return f",
+          5, 6 },
+        { "and-or",
+          "local function f(x) return x and 10 or 20 end; return f",
+          false, 20 },
+        { "nil-eq",
+          "local function f(x) if x == nil then return 1 else return 2 end end; return f",
+          nil, 1 },
+        { "break",
+          "local function f(x) local s=0; for i=1,x do if i==3 then break end; " ..
+          "s=s+i end; return s end; return f", 5, 3 },
+        { "negative-for",
+          "local function f(x) local s=0; for i=x,1,-1 do s=s+i end; " ..
+          "return s end; return f", 5, 15 },
+    }
+
+    for i = 1, #control do
+        local name, src, arg, expected = control[i][1], control[i][2], control[i][3], control[i][4]
+        local f, err = compile(src, {}, { backend = "closure" })
+        t:check(f ~= nil, "control compile " .. name .. ": " .. tostring(err))
+        if f then
+            local fn = f()
+            local proto = rt.closure_info[fn][1]
+            local entry, perr = rt.build_program(proto)
+            t:check(entry ~= nil, "control chain " .. name .. ": " .. tostring(perr))
+            local ok, got = pcall(fn, arg)
+            t:check(ok and got == expected,
+                "control run " .. name .. ": " .. tostring(got))
+        end
+    end
+
+    local lim, lerr = compile(
+        "local function f(x) local s=0; for i=1,x do s=s+i end; " ..
+        "return s end; return f", {}, { backend = "closure", maxInstructions = 20 })
+    t:check(lim ~= nil, "limit compile: " .. tostring(lerr))
+    if lim then
+        local ok, err = pcall(lim(), 5)
+        t:check(not ok and tostring(err):find("instruction limit") ~= nil,
+            "closure instruction budget")
+    end
+
     -- Opt-in integration: a nested leaf must be built through make_closure
     -- and still return the right values when called from the legacy root.
     local f2, err2 = compile(

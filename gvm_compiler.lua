@@ -732,7 +732,8 @@ local function custom_loadstring(source, env, opts)
         -- Post-compile peephole optimizer: fuses frequent instruction
         -- sequences into superinstructions without shifting code.
         -- ========================================================
-        local function optimize_code(co, n)
+        local function optimize_code(co, n, skip_fusions)
+            if skip_fusions then return end
             local targets = {}
             local dead = {}
 
@@ -2299,7 +2300,7 @@ local function custom_loadstring(source, env, opts)
                 local kind, ref = resolve_var(name)
                 local p = function_proto(kind, ref)
                 local proto = p and p.simple and p or nil
-                if tk == "(" and proto and try_inline_call(proto) then
+                if backend ~= "closure" and tk == "(" and proto and try_inline_call(proto) then
                     compile_suffix()
                 else
                     local save_no_tail = no_tail_call
@@ -2615,7 +2616,7 @@ local function custom_loadstring(source, env, opts)
                 rawcode[i] = child.code[i]
             end
             child.code.slotlen = child.slotlen
-        optimize_code(child.code, child.ncode)
+        optimize_code(child.code, child.ncode, backend == "closure")
             if child.ncode > limits.maxCodeSlots then
                 error("code exceeds maxCodeSlots", 0)
             end
@@ -3306,7 +3307,7 @@ local function custom_loadstring(source, env, opts)
         end
         emit(RET, 0, 0, 0)
         fc.code.slotlen = fc.slotlen
-        optimize_code(fc.code, fc.ncode)
+        optimize_code(fc.code, fc.ncode, backend == "closure")
         if fc.ncode > limits.maxCodeSlots then
             error("code exceeds maxCodeSlots", 0)
         end

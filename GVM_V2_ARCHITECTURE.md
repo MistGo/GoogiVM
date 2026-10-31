@@ -1,7 +1,8 @@
 # GoogiVM v2 — block-threaded closure VM
 
-Status: branch `gvm-closure-v2`, phase 0 (module boundary) complete.
-`main` remains the stable single-file VM.
+Status: branch `gvm-closure-v2`; phase 0 (module boundary), phase 1
+(straight-line chain) and phase 2 (base branches/loops/budget) are implemented
+and tested. `main` remains the stable single-file VM.
 
 ## Why a new backend
 
@@ -108,20 +109,24 @@ prototype in the first phase; that keeps error line mapping and limits simple.
 - Public entry loads modules through relative and `$CONTENT_DATA` paths.
 - Full suite: 18,737 LuaJIT / 18,713 Lua 5.4 checks.
 
-### Phase 1 — block plan and chain prototype
+### Phase 1 - block plan and chain prototype (done)
 
 - Record slot lengths during emission/optimization.
 - Build a block plan for a prototype.
-- Implement a closure chain for straight-line arithmetic/local/return blocks.
-- Opt in through an internal backend option; default remains `legacy`.
-- Add focused tests comparing both backends on the same chunks.
+- Implemented `slotlen`, `scan_block`, `build_block_chain`, `build_program`
+  and `run_block_chain`.
+- Opt-in through `backend = "closure"`; default remains `legacy`.
+- Focused tests compare chain results with the legacy interpreter.
 
-### Phase 2 — branches and loops
+### Phase 2 - branches and loops (base opcodes done)
 
-- Compile `JMP`, `JMPF`, `TESTF`, `TESTT`, `JMPNIL`, `FORPREP`, `FORLOOP`.
-- Return continuations instead of host recursion.
-- Preserve instruction budgets at block boundaries.
-- Add loop, `break`, `repeat`, numeric/generic-for tests.
+- Implemented `JMP`, `JMPF`, `TESTF`, `TESTT`, `JMPNIL`, `FORPREP`, `FORLOOP`.
+- Continuations are returned instead of recursing through the host stack.
+- `maxInstructions` is enforced at every chain step.
+- Tests cover `if`, `while`, `repeat`, numeric `for`, `break` and negative steps.
+- Closure mode currently disables peephole fusions so the builder sees base
+  opcodes; fused control-flow specialization is a later optimization.
+- Generic `for` needs calls/iterators and moves to phase 3.
 
 ### Phase 3 — calls, closures and cells
 

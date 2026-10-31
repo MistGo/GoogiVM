@@ -61,8 +61,8 @@ LuaJIT is the primary target. Lua 5.4 is a compatibility smoke run; some `setfen
 
 Expected baseline:
 
-- LuaJIT: 18,795 checks, 0 failed.
-- Lua 5.4: 18,771 checks, 0 failed.
+- LuaJIT: 18,827 checks, 0 failed.
+- Lua 5.4: 18,803 checks, 0 failed.
 
 If `luajit` is unavailable in the environment, run the Lua suite and report that the primary host was not tested.
 
@@ -96,6 +96,8 @@ Important details:
 Do not fuse across a jump target. `optimize_code` records targets for `JMP`, `JMPF`, `TESTF`, `TESTT`, `JMPNIL`, `FORPREP`, and `FORLOOP`; `can()` must guard every candidate.
 
 Every live instruction must have an entry in `proto.slotlen`. `emit` writes 1; every fused `put` writes its slot count. The closure block builder must reject a missing entry rather than infer a length.
+
+`backend = "closure"` currently skips peephole fusions and leaf inlining so the builder sees base opcodes. Do not enable fusions for that backend until the closure handlers cover the fused control-flow and call opcodes.
 
 The fused skip length must match `put()`:
 

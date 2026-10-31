@@ -590,11 +590,8 @@ local closure_backend = {}
 local function make_closure(proto, upvals, fenv, set_native_env)
     local info
     local chain
-    if proto.backend == "closure" and closure_backend.scan_block then
-        local block = closure_backend.scan_block(proto)
-        if block then
-            chain = closure_backend.build_block_chain(proto, block)
-        end
+    if proto.backend == "closure" and closure_backend.build_program then
+        chain = closure_backend.build_program(proto)
     end
     local function closure(...)
         if chain then
@@ -3501,12 +3498,13 @@ local function arith_fn(kind)
     return ARITH[kind]
 end
 
-function closure_backend.build_block_chain(proto, block)
+function closure_backend.build_block_chain(proto, block, entries)
     if proto.isvararg then
         return nil, "vararg prototype"
     end
     local K = proto.consts
     local ops = block.ops
+    local next_pc = block.nextpc
     local next_op = nil
     for i = #ops, 1, -1 do
         local ins = ops[i]
@@ -3576,6 +3574,18 @@ function closure_backend.build_block_chain(proto, block)
                 st.S[top] = nil
                 top = top - 1
                 st.S[top] = fn(x, y)
+                st.top = top
+                return nxt
+            end
+        elseif op >= 23 and op <= 28 then -- comparisons
+            local cmp = op
+            handler = function(st)
+                local top = st.top
+                local y = st.S[top]
+                local x = st.S[top - 1]
+                st.S[top] = nil
+                top = top - 1
+                st.S[top] = compare_op(cmp, x, y)
                 st.top = top
                 return nxt
             end
@@ -3679,6 +3689,83 @@ function closure_backend.build_block_chain(proto, block)
                 st.S[top] = fn(st.S[top], k)
                 return nxt
             end
+        elseif op == 32 then -- JMP
+            local target = a
+            handler = function(st) return entries and entries[target] end
+        elseif op == 31 then -- JMPF
+            local target = a
+            handler = function(st)
+                local top = st.top
+                local v = st.S[top]
+                st.S[top] = nil
+                st.top = top - 1
+                if not v then return entries[target] end
+                return entries[next_pc]
+            end
+        elseif op == 29 then -- TESTF
+            local target = a
+            handler = function(st)
+                local top = st.top
+                if not st.S[top] then return entries[target] end
+                st.S[top] = nil
+                st.top = top - 1
+                return entries[next_pc]
+            end
+        elseif op == 30 then -- TESTT
+            local target = a
+            handler = function(st)
+                local top = st.top
+                if st.S[top] then return entries[target] end
+                st.S[top] = nil
+                st.top = top - 1
+                return entries[next_pc]
+            end
+        elseif op == 51 then -- JMPNIL
+            local target = a
+            handler = function(st)
+                local top = st.top
+                local v = st.S[top]
+                st.S[top] = nil
+                st.top = top - 1
+                if v == nil then return entries[target] end
+                return entries[next_pc]
+            end
+        elseif op == 46 then -- FORPREP
+            local r = a
+            local target = b
+            handler = function(st)
+                local idx = tonumber(st.S[r])
+                local limit = tonumber(st.S[r + 1])
+                local step = tonumber(st.S[r + 2])
+                if not idx or not limit or not step then
+                    error("'for' values must be numbers", 0)
+                end
+                st.S[r] = idx
+                st.S[r + 1] = limit
+                st.S[r + 2] = step
+                if step == 0 then
+                    error("'for' step is zero", 0)
+                end
+                if (step > 0 and idx > limit) or
+                   (step < 0 and idx < limit) then
+                    return entries[target]
+                end
+                return entries[next_pc]
+            end
+        elseif op == 47 then -- FORLOOP
+            local r = a
+            local target = b
+            handler = function(st)
+                local step = st.S[r + 2]
+                local limit = st.S[r + 1]
+                local idx = st.S[r] + step
+                if (step > 0 and idx <= limit) or
+                   (step < 0 and idx >= limit) then
+                    st.S[r] = idx
+                    return entries[target]
+                end
+                return entries[next_pc]
+            end
         elseif op == 34 then -- RET
             local nret = a
             if nret < 0 then
@@ -3703,6 +3790,74 @@ function closure_backend.build_block_chain(proto, block)
     return next_op
 end
 
+function closure_backend.build_program(proto)
+    if proto.isvararg then
+        return nil, "vararg prototype"
+    end
+    local n = proto.ncode or #proto.code
+    local entry_pc = proto.entry or 1
+    local entries, blocks, visiting = {}, {}, {}
+
+    local function ensure(start)
+        if entries[start] or visiting[start] then
+            return true
+        end
+        if not start or start > n then
+            return true
+        end
+        visiting[start] = true
+        local block, err = closure_backend.scan_block(proto, start)
+        if not block then
+            visiting[start] = nil
+            return nil, err
+        end
+        blocks[start] = block
+        local term = block.ops[#block.ops]
+        local op = term.op
+        local function need(pc)
+            if pc and pc <= n then
+                return ensure(pc)
+            end
+            return true
+        end
+        local ok, e = true, nil
+        if op == 34 then
+            -- return
+        elseif op == 32 then
+            ok, e = need(term.a)
+        elseif op == 31 or op == 29 or op == 30 or op == 51 then
+            ok, e = need(term.a)
+            if ok then ok, e = need(block.nextpc) end
+        elseif op == 46 or op == 47 then
+            ok, e = need(term.b)
+            if ok then ok, e = need(block.nextpc) end
+        elseif op == 33 then
+            ok, e = false, "calls unsupported"
+        else
+            ok, e = false, "unsupported terminator " .. tostring(op)
+        end
+        if not ok then
+            visiting[start] = nil
+            return nil, e
+        end
+        visiting[start] = nil
+        return true
+    end
+
+    local ok, err = ensure(entry_pc)
+    if not ok then
+        return nil, err
+    end
+    for start, block in pairs(blocks) do
+        local entry, berr = closure_backend.build_block_chain(proto, block, entries)
+        if not entry then
+            return nil, berr
+        end
+        entries[start] = entry
+    end
+    return entries[entry_pc]
+end
+
 function closure_backend.run_block_chain(proto, entry, ...)
     local args = pack(...)
     local S = {}
@@ -3713,8 +3868,17 @@ function closure_backend.run_block_chain(proto, entry, ...)
         S[i] = nil
     end
     local st = { S = S, top = proto.maxreg, ret = nil, nret = 0 }
+    local max = proto.limits and proto.limits.maxInstructions
+    if max == math.huge then max = nil end
+    local steps = 0
     local op = entry
     while op do
+        if max then
+            steps = steps + 1
+            if steps > max then
+                error("instruction limit exceeded", 0)
+            end
+        end
         op = op(st)
     end
     if st.nret == 0 then
@@ -3731,5 +3895,6 @@ return {
     run_closure = run_closure,
     scan_block = closure_backend.scan_block,
     build_block_chain = closure_backend.build_block_chain,
+    build_program = closure_backend.build_program,
     run_block_chain = closure_backend.run_block_chain,
 }

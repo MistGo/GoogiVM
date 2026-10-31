@@ -187,23 +187,27 @@ iteration, so a 600k-iteration tail-recursive loop eventually tripped
 
 ## 6. Experimental block-threaded closure slice
 
-`gvm_runtime.lua` exposes `scan_block`, `build_block_chain` and
-`run_block_chain`. They are the first vertical slice of the v2 backend described
-in [`GVM_V2_ARCHITECTURE.md`](GVM_V2_ARCHITECTURE.md).
+`gvm_runtime.lua` exposes `scan_block`, `build_block_chain`,
+`build_program` and `run_block_chain`. They are the first vertical slices of
+the v2 backend described in [`GVM_V2_ARCHITECTURE.md`](GVM_V2_ARCHITECTURE.md).
 
 - `proto.slotlen` gives the exact span of every live instruction, including
   fused instructions.
-- `scan_block` walks a straight-line block until a branch, call, loop edge or
-  return and returns the instruction descriptors.
-- `build_block_chain` turns supported stack arithmetic, locals, concatenation
-  and `RET` into a chain of Lua closures. Each closure returns the next one;
-  `run_block_chain` is the trampoline.
+- `scan_block` walks a block until a branch, call, loop edge or return and
+  returns the instruction descriptors.
+- `build_block_chain` turns supported stack arithmetic, locals, comparisons,
+  branches, loops and `RET` into a chain of Lua closures. Each closure returns
+  the next one; `run_block_chain` is the trampoline.
+- `build_program` discovers the reachable block graph and links the closures
+  through a shared entry table. `maxInstructions` is enforced per chain step.
 - Unsupported instructions make the builder return `nil, err`, so the prototype
   falls back to `run_closure`.
 
-The public option `backend = "closure"` is experimental. It only affects
-straight-line leaf functions; control flow, calls, tables, limits and
-source-line tracebacks are not implemented in the slice yet. Keep the default
+The public option `backend = "closure"` is experimental. It compiles the
+selected chunk without peephole fusions so the block builder sees base
+opcodes, and it supports `if`/`while`/`repeat`/numeric `for`/`break` for leaf
+functions. Calls, closures/upvalues, tables, stack/return limits and source-line
+tracebacks are not implemented in the slice yet. Keep the default
 `backend = "legacy"` for production and untrusted code.
 
 ---
