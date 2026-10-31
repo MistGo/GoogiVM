@@ -145,6 +145,7 @@ general default.
   `maxCallDepth` are still pending.
 - `VARARG`, open returns and vararg table tails are implemented.
 - Globals and generic `for` work through `CALLD`/`MARK`/`JMPNIL`.
+- `maxInstructions`, `maxArgs`, `maxReturns` and `maxStack` are enforced.
 - Fresh-per-iteration loop cells with captured variables are still pending.
 - `pcall`/`xpcall` and traceback tests are still pending.
 

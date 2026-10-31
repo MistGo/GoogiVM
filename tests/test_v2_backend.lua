@@ -271,6 +271,36 @@ return function(t)
             "vararg root return")
     end
 
+    local arglim, aerr = compile(
+        "local function f(...) return ... end; return f", {},
+        { backend = "closure", maxArgs = 2 })
+    t:check(arglim ~= nil, "args limit compile: " .. tostring(aerr))
+    if arglim then
+        local ok, err = pcall(arglim(), 1, 2, 3)
+        t:check(not ok and tostring(err):find("too many arguments") ~= nil,
+            "closure maxArgs")
+    end
+
+    local retlim, rerr = compile(
+        "local function f() return 1,2,3 end; return f", {},
+        { backend = "closure", maxReturns = 2 })
+    t:check(retlim ~= nil, "returns limit compile: " .. tostring(rerr))
+    if retlim then
+        local ok, err = pcall(retlim())
+        t:check(not ok and tostring(err):find("too many return values") ~= nil,
+            "closure maxReturns")
+    end
+
+    local stacklim, sterr = compile(
+        "local function f() local a,b,c,d=1,2,3,4; return a end; return f",
+        {}, { backend = "closure", maxStack = 2 })
+    t:check(stacklim ~= nil, "stack limit compile: " .. tostring(sterr))
+    if stacklim then
+        local ok, err = pcall(stacklim())
+        t:check(not ok and tostring(err):find("stack limit") ~= nil,
+            "closure maxStack")
+    end
+
     local lim, lerr = compile(
         "local function f(x) local s=0; for i=1,x do s=s+i end; " ..
         "return s end; return f", {}, { backend = "closure", maxInstructions = 20 })

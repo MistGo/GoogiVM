@@ -215,9 +215,10 @@ functions. `CALLD` is handled for native and interpreted targets, including
 tail calls, result adjustment and multiple returns, but through host recursion
 rather than explicit VM frames. `CLOSURE`, upvalues, heap cells, table
 construction/reads/writes, `SELF`, varargs/open returns, globals and generic
-`for` (through `CALLD`/`MARK`/`JMPNIL`) are also handled. Stack/call-depth
-limits and source-line tracebacks are not implemented in the slice yet. Keep
-the default `backend = "legacy"` for production and untrusted code.
+`for` (through `CALLD`/`MARK`/`JMPNIL`) are also handled. `maxInstructions`,
+`maxArgs`, `maxReturns` and `maxStack` are enforced; `maxCallDepth` and
+source-line tracebacks are not implemented in the slice yet. Keep the default
+`backend = "legacy"` for production and untrusted code.
 
 ---
 

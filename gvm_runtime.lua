@@ -3995,6 +3995,9 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
             i = i + 1
         end
         st.top = top
+        if st.limits.maxStack and top > st.limits.maxStack then
+            error("stack limit exceeded", 0)
+        end
 
         local op = top_op
         if op == 34 then
@@ -4002,6 +4005,9 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
             if nret < 0 then
                 nret = top - proto.maxreg
                 if nret < 0 then nret = 0 end
+            end
+            if st.limits.maxReturns and nret > st.limits.maxReturns then
+                error("too many return values", 0)
             end
             local ret = {}
             local src = top - nret + 1
@@ -4042,6 +4048,12 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
             local fpos = S[mreg]
             local f = S[fpos]
             local nargs = top - fpos
+            if st.limits.maxArgs and nargs > st.limits.maxArgs then
+                error("too many arguments", 0)
+            end
+            if st.limits.maxStack and top > st.limits.maxStack then
+                error("stack limit exceeded", 0)
+            end
             local rs = pack(f(unpack(S, fpos + 1, top)))
             if tail then
                 st.ret = rs
@@ -4049,6 +4061,9 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
                 return nil
             end
             top = fpos - 1
+            if st.limits.maxReturns and nres > st.limits.maxReturns then
+                error("too many return values", 0)
+            end
             if nres < 0 then
                 for j = 1, rs.n do
                     top = top + 1
@@ -4227,6 +4242,13 @@ end
 
 function closure_backend.run_chain(proto, entry, upvals, ...)
     local args = pack(...)
+    local limits = proto.limits or {}
+    if limits.maxArgs and args.n > limits.maxArgs then
+        error("too many arguments", 0)
+    end
+    if limits.maxStack and proto.maxreg > limits.maxStack then
+        error("stack limit exceeded", 0)
+    end
     local S = {}
     for i = 1, proto.numparams do
         S[i] = args[i]
@@ -4248,6 +4270,7 @@ function closure_backend.run_chain(proto, entry, upvals, ...)
     if max == math.huge then max = nil end
     local st = { S = S, top = proto.maxreg, ret = nil, nret = 0,
                  max = max, steps = 0, ups = upvals, va = va,
+                 limits = limits,
                  env = (upvals and upvals[2]) or proto.env }
     local op = entry
     while op do
