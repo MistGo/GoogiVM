@@ -158,7 +158,24 @@ general default.
 - Host metamethod behavior is preserved through normal Lua table operations.
 - Broader metamethod and constructor tests are still pending.
 
-### Phase 5 — selection and benchmarks
+### Current 16-task baseline (local)
+
+`benchmarks/bench_backend_compare.lua` runs `benchmarks/benchreal.lua` through
+both backends.
+
+| Host mode | Legacy | Closure | Closure / legacy |
+|---|---:|---:|---:|
+| `luajit -joff` | 3.86 s | 14.77 s | **0.26x** |
+| `luajit` | 1.42 s | 7.19 s | **0.20x** |
+
+All 16 tasks returned the correct result under both backends. The closure
+backend is therefore **semantically validated** on the real suite, but it is
+still much slower overall: general loop bodies pay per-block dispatch and the
+mode disables peephole fusions. The `acc = acc + i` loop superinstruction only
+covers one shape. Do not switch the default until more loop shapes are
+specialized and the total improves.
+
+### Phase 5 - selection and benchmarks
 
 - Compare `legacy` and `closure` on the 16-task real suite and 50-case suite.
 - Select the backend per prototype only when it wins and is correct.
