@@ -595,7 +595,7 @@ local function make_closure(proto, upvals, fenv, set_native_env)
     end
     local function closure(...)
         if chain then
-            return closure_backend.run_block_chain(proto, chain, ...)
+            return closure_backend.run_chain(proto, chain, info, ...)
         end
         if info[4] then
             return run_closure(closure, nil, ...)
@@ -3793,9 +3793,6 @@ end
 -- A true block closure: one Lua call executes the whole straight-line body
 -- with an internal dispatch, then returns the next block or stops.
 function closure_backend.build_block_closure(proto, block, entries, loop_info)
-    if proto.isvararg then
-        return nil, "vararg prototype"
-    end
     local K = proto.consts
     local ops = block.ops
     local n = #ops
@@ -3806,20 +3803,20 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
     local top_op = term.op
     if not (top_op == 34 or top_op == 32 or top_op == 31 or
             top_op == 29 or top_op == 30 or top_op == 51 or
-            top_op == 46 or top_op == 47) then
+            top_op == 46 or top_op == 47 or top_op == 33) then
         return nil, "unsupported terminator " .. tostring(top_op)
     end
     local body_n = n - 1
     for i = 1, body_n do
         local op = ops[i].op
         local ok = op == 50 or op == 1 or op == 2 or op == 3 or op == 4 or
-            op == 5 or (op >= 13 and op <= 22) or (op >= 23 and op <= 28)
+            op == 5 or op == 6 or op == 7 or op == 8 or op == 9 or op == 10 or
+            op == 35 or (op >= 36 and op <= 43) or
+            op == 44 or op == 45 or op == 48 or op == 49 or
+            (op >= 13 and op <= 22) or (op >= 23 and op <= 28)
         if not ok then
             return nil, "unsupported block opcode " .. tostring(op)
         end
-    end
-    if top_op == 34 and term.a < 0 then
-        return nil, "open return"
     end
 
     local function block_closure(st)
@@ -3856,6 +3853,113 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
                 S[ins.a] = S[top]
                 S[top] = nil
                 top = top - 1
+            elseif op == 6 then -- GETCELL
+                top = top + 1
+                S[top] = S[ins.a].v
+            elseif op == 7 then -- SETCELL
+                S[ins.a].v = S[top]
+                S[top] = nil
+                top = top - 1
+            elseif op == 8 then -- CELL
+                local idx = ins.a
+                S[idx] = { v = S[idx] }
+            elseif op == 9 then -- GETUPVAL
+                top = top + 1
+                S[top] = st.ups[ins.a + 4].v
+            elseif op == 10 then -- SETUPVAL
+                st.ups[ins.a + 4].v = S[top]
+                S[top] = nil
+                top = top - 1
+            elseif op == 48 then -- CLOSURE
+                local cp = proto.protos[ins.a]
+                local ud = cp.updesc
+                local ups = { cp, st.env, false, true }
+                for j = 1, #ud do
+                    local d = ud[j]
+                    if d.instack == 1 then
+                        ups[j + 4] = S[d.idx]
+                    else
+                        ups[j + 4] = st.ups[d.idx + 4]
+                    end
+                end
+                top = top + 1
+                S[top] = make_closure(cp, ups, st.env, false)
+            elseif op == 36 then -- NEWTABLE
+                top = top + 1
+                S[top] = {}
+            elseif op == 37 then -- FIELD
+                local t = S[top]
+                S[top] = t[K[ins.a]]
+            elseif op == 38 then -- INDEX
+                local key = S[top]
+                S[top] = nil
+                top = top - 1
+                local t = S[top]
+                S[top] = t[key]
+            elseif op == 39 then -- SETFIELD
+                local val = S[top]
+                S[top] = nil
+                top = top - 1
+                local t = S[ins.a]
+                t[K[ins.b]] = val
+            elseif op == 40 then -- SETINDEX
+                local val = S[top]
+                S[top] = nil
+                top = top - 1
+                local t = S[ins.a]
+                t[S[ins.b]] = val
+            elseif op == 41 then -- SELF
+                local t = S[top]
+                S[top] = t[K[ins.a]]
+                top = top + 1
+                S[top] = t
+            elseif op == 42 then -- SETLIST
+                local val = S[top]
+                S[top] = nil
+                top = top - 1
+                local t = S[ins.a]
+                t[ins.b] = val
+            elseif op == 43 then -- SETLISTMULTI
+                local t = S[ins.a]
+                local idx = ins.b
+                local marker = S[ins.c]
+                local count = top - marker
+                for j = 1, count do
+                    t[idx + j - 1] = S[marker + j]
+                end
+                for j = marker + 1, top do
+                    S[j] = nil
+                end
+                top = marker
+            elseif op == 44 then
+                S[ins.a] = top - ins.b
+            elseif op == 45 then
+                local count = ins.a
+                for j = 1, count do
+                    S[top] = nil
+                    top = top - 1
+                end
+            elseif op == 49 then
+                S[ins.a] = S[top - ins.b]
+            elseif op == 35 then -- VARARG
+                local nres = ins.a
+                local va = st.va
+                local count = va and va.n or 0
+                if nres < 0 then
+                    for j = 1, count do
+                        top = top + 1
+                        S[top] = va[j]
+                    end
+                else
+                    for j = 1, nres do
+                        top = top + 1
+                        if j <= count then
+                            S[top] = va[j]
+                        else
+                            S[top] = nil
+                        end
+                    end
+                end
             elseif op >= 13 and op <= 19 then
                 local b = S[top]
                 local a = S[top - 1]
@@ -3888,6 +3992,10 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
         local op = top_op
         if op == 34 then
             local nret = term.a
+            if nret < 0 then
+                nret = top - proto.maxreg
+                if nret < 0 then nret = 0 end
+            end
             local ret = {}
             local src = top - nret + 1
             for j = 1, nret do
@@ -3919,6 +4027,37 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
             S[top] = nil
             st.top = top - 1
             if v == nil then return entries[term.a] end
+            return entries[block.nextpc]
+        elseif op == 33 then -- CALLD
+            local mreg = term.a
+            local nres = term.b
+            local tail = term.c == 1
+            local fpos = S[mreg]
+            local f = S[fpos]
+            local nargs = top - fpos
+            local rs = pack(f(unpack(S, fpos + 1, top)))
+            if tail then
+                st.ret = rs
+                st.nret = rs.n
+                return nil
+            end
+            top = fpos - 1
+            if nres < 0 then
+                for j = 1, rs.n do
+                    top = top + 1
+                    S[top] = rs[j]
+                end
+            elseif nres > 0 then
+                for j = 1, nres do
+                    top = top + 1
+                    if j <= rs.n then
+                        S[top] = rs[j]
+                    else
+                        S[top] = nil
+                    end
+                end
+            end
+            st.top = top
             return entries[block.nextpc]
         elseif op == 46 then
             local r = term.a
@@ -3976,9 +4115,6 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
 end
 
 function closure_backend.build_program(proto)
-    if proto.isvararg then
-        return nil, "vararg prototype"
-    end
     local n = proto.ncode or #proto.code
     local entry_pc = proto.entry or 1
     local entries, blocks, visiting = {}, {}, {}
@@ -4017,7 +4153,9 @@ function closure_backend.build_program(proto)
             ok, e = need(term.b)
             if ok then ok, e = need(block.nextpc) end
         elseif op == 33 then
-            ok, e = false, "calls unsupported"
+            if term.c ~= 1 then
+                ok, e = need(block.nextpc)
+            end
         else
             ok, e = false, "unsupported terminator " .. tostring(op)
         end
@@ -4080,7 +4218,7 @@ function closure_backend.build_program(proto)
     return entries[entry_pc]
 end
 
-function closure_backend.run_block_chain(proto, entry, ...)
+function closure_backend.run_chain(proto, entry, upvals, ...)
     local args = pack(...)
     local S = {}
     for i = 1, proto.numparams do
@@ -4089,10 +4227,21 @@ function closure_backend.run_block_chain(proto, entry, ...)
     for i = proto.numparams + 1, proto.maxreg do
         S[i] = nil
     end
+    local va
+    if proto.isvararg then
+        local nv = args.n - proto.numparams
+        if nv > 0 then
+            va = { n = nv }
+            for i = 1, nv do
+                va[i] = args[proto.numparams + i]
+            end
+        end
+    end
     local max = proto.limits and proto.limits.maxInstructions
     if max == math.huge then max = nil end
     local st = { S = S, top = proto.maxreg, ret = nil, nret = 0,
-                 max = max, steps = 0 }
+                 max = max, steps = 0, ups = upvals, va = va,
+                 env = (upvals and upvals[2]) or proto.env }
     local op = entry
     while op do
         op = op(st)
@@ -4101,6 +4250,10 @@ function closure_backend.run_block_chain(proto, entry, ...)
         return
     end
     return unpack(st.ret, 1, st.nret)
+end
+
+function closure_backend.run_block_chain(proto, entry, ...)
+    return closure_backend.run_chain(proto, entry, nil, ...)
 end
 
 return {

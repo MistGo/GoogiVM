@@ -136,18 +136,23 @@ loop bodies still pay per-block/per-op dispatch and may be slower. More loop
 shapes need their own superinstructions before the closure backend can be a
 general default.
 
-### Phase 3 — calls, closures and cells
+### Phase 3 - calls, closures and cells (partial)
 
-- `CALLD`, `CLOSURE`, `MARK`/`POP`/`PEEK`, `VARARG`, `SETLISTMULTI`.
-- Explicit frames, tail calls, varargs, multiple returns.
-- Captured locals and fresh-per-iteration loop cells.
-- `pcall`/`xpcall` and traceback tests.
+- Implemented `CALLD` for native and interpreted targets, tail-call returns,
+  result adjustment, `CLOSURE`, `GETUPVAL`/`SETUPVAL`, `CELL`/`GETCELL`/
+  `SETCELL`, `MARK`/`POP`/`PEEK` and `SETLISTMULTI`.
+- Calls currently use host recursion; explicit frame suspension and
+  `maxCallDepth` are still pending.
+- `VARARG`, open returns and vararg table tails are implemented.
+- Fresh-per-iteration loop cells with captured variables are still pending.
+- `pcall`/`xpcall` and traceback tests are still pending.
 
-### Phase 4 — tables, operators and metamethods
+### Phase 4 - tables, operators and metamethods (partial)
 
-- `NEWTABLE`, `FIELD`/`INDEX`/`SETFIELD`/`SETINDEX`, `SELF`, `SETLIST`.
-- Full operator/metamethod behavior.
-- Table constructor and method-call tests.
+- Implemented `NEWTABLE`, `FIELD`/`INDEX`/`SETFIELD`/`SETINDEX`, `SELF`,
+  `SETLIST` and `SETLISTMULTI`.
+- Host metamethod behavior is preserved through normal Lua table operations.
+- Broader metamethod and constructor tests are still pending.
 
 ### Phase 5 — selection and benchmarks
 

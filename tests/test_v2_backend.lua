@@ -112,6 +112,123 @@ return function(t)
         end
     end
 
+    -- Calls: native targets, interpreted targets and multiple results.
+    local call_src = "local function call(f,x) return f(x) end; return call"
+    local callf, cerr = compile(call_src, { math = math }, { backend = "closure" })
+    t:check(callf ~= nil, "call compile: " .. tostring(cerr))
+    if callf then
+        local call = callf()
+        local cp = rt.closure_info[call][1]
+        local ce, cee = rt.build_program(cp)
+        t:check(ce ~= nil, "call chain: " .. tostring(cee))
+        t:check(call(math.sqrt, 9) == 3, "call native target")
+        local leaff = assert(compile(
+            "local function leaf(x) return x * 2 end; return leaf", {},
+            { backend = "closure" }))
+        local leaf = leaff()
+        t:check(call(leaf, 21) == 42, "call interpreted target")
+        local function pair(x) return x, x + 1 end
+        local got = pack(pcall(call, pair, 5))
+        t:check(got[1] and got.n == 3 and got[2] == 5 and got[3] == 6,
+            "call multiple returns")
+    end
+
+    local extra_src = "local function call(f,x) return f(x), 99 end; return call"
+    local extraf, eerr = compile(extra_src, {}, { backend = "closure" })
+    t:check(extraf ~= nil, "extra compile: " .. tostring(eerr))
+    if extraf then
+        local call = extraf()
+        local function pair(x) return x, x + 1 end
+        local got = pack(pcall(call, pair, 5))
+        t:check(got[1] and got.n == 3 and got[2] == 5 and got[3] == 99,
+            "call result adjustment")
+    end
+
+    -- Closures, cells and shared upvalues.
+    local up_src = "local function make() local x=1; return function() x=x+1; return x end end; return make"
+    local upf, uerr = compile(up_src, {}, { backend = "closure" })
+    t:check(upf ~= nil, "upvalue compile: " .. tostring(uerr))
+    if upf then
+        local fn = upf()()
+        local p = rt.closure_info[fn][1]
+        local ce, cee = rt.build_program(p)
+        t:check(ce ~= nil, "upvalue chain: " .. tostring(cee))
+        t:check(fn() == 2 and fn() == 3, "shared upvalue mutation")
+    end
+
+    local shared_src = "local function make() local x=1; " ..
+        "local function inc() x=x+1 end; local function get() return x end; " ..
+        "inc(); inc(); return get end; return make"
+    local sharedf, serr = compile(shared_src, {}, { backend = "closure" })
+    t:check(sharedf ~= nil, "shared compile: " .. tostring(serr))
+    if sharedf then
+        local get = sharedf()()
+        t:check(get() == 3, "shared cell between closures")
+    end
+
+    -- Table construction, indexed access and method calls.
+    local table_src = "local function f(x) local t={a=1,[x]=2,3,4}; " ..
+        "return t.a,t[x],t[1],t[2] end; return f"
+    local tablef, terr = compile(table_src, {}, { backend = "closure" })
+    t:check(tablef ~= nil, "table compile: " .. tostring(terr))
+    if tablef then
+        local f = tablef()
+        local p = rt.closure_info[f][1]
+        local ce, cee = rt.build_program(p)
+        t:check(ce ~= nil, "table chain: " .. tostring(cee))
+        local got = pack(f(5))
+        t:check(got[1] == 1 and got[2] == 2 and got[3] == 3 and got[4] == 4,
+            "table literal/index")
+    end
+
+    local self_src = "local function f(x) local t={x=x}; " ..
+        "function t:get() return self.x end; return t:get() end; return f"
+    local selff, serr2 = compile(self_src, {}, { backend = "closure" })
+    t:check(selff ~= nil, "self compile: " .. tostring(serr2))
+    if selff then
+        t:check(selff()(7) == 7, "method SELF call")
+    end
+
+    local vararg_table_src = "local function pair() return 1,2 end; " ..
+        "local function f() local t={pair()}; return t[1],t[2] end; return f"
+    local vtf, vterr = compile(vararg_table_src, {}, { backend = "closure" })
+    t:check(vtf ~= nil, "multi table compile: " .. tostring(vterr))
+    if vtf then
+        local got = pack(vtf()())
+        t:check(got[1] == 1 and got[2] == 2, "table multi-return tail")
+    end
+
+    -- Varargs in returns, parameter adjustment and table tails.
+    local vararg_src = "local function f(a,...) return a,... end; return f"
+    local vf, verr = compile(vararg_src, {}, { backend = "closure" })
+    t:check(vf ~= nil, "vararg compile: " .. tostring(verr))
+    if vf then
+        local f = vf()
+        local p = rt.closure_info[f][1]
+        t:check(p.isvararg, "vararg prototype marker")
+        local got = pack(f(1, 2, 3))
+        t:check(got.n == 3 and got[1] == 1 and got[2] == 2 and got[3] == 3,
+            "vararg return expansion")
+    end
+
+    local vtable_src = "local function f(...) local t={...}; " ..
+        "return t[1],t[2],t[3] end; return f"
+    local vtf2, vterr2 = compile(vtable_src, {}, { backend = "closure" })
+    t:check(vtf2 ~= nil, "vararg table compile: " .. tostring(vterr2))
+    if vtf2 then
+        local got = pack(vtf2()(4, 5, 6))
+        t:check(got.n == 3 and got[1] == 4 and got[2] == 5 and got[3] == 6,
+            "vararg table expansion")
+    end
+
+    local rootf, rerr = compile("return ...", {}, { backend = "closure" })
+    t:check(rootf ~= nil, "vararg root compile: " .. tostring(rerr))
+    if rootf then
+        local got = pack(rootf(7, 8))
+        t:check(got.n == 2 and got[1] == 7 and got[2] == 8,
+            "vararg root return")
+    end
+
     local lim, lerr = compile(
         "local function f(x) local s=0; for i=1,x do s=s+i end; " ..
         "return s end; return f", {}, { backend = "closure", maxInstructions = 20 })

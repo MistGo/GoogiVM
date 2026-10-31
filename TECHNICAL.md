@@ -211,9 +211,13 @@ the v2 backend described in [`GVM_V2_ARCHITECTURE.md`](GVM_V2_ARCHITECTURE.md).
 The public option `backend = "closure"` is experimental. It compiles the
 selected chunk without peephole fusions so the block builder sees base
 opcodes, and it supports `if`/`while`/`repeat`/numeric `for`/`break` for leaf
-functions. Calls, closures/upvalues, tables, stack/return limits and source-line
-tracebacks are not implemented in the slice yet. Keep the default
-`backend = "legacy"` for production and untrusted code.
+functions. `CALLD` is handled for native and interpreted targets, including
+tail calls, result adjustment and multiple returns, but through host recursion
+rather than explicit VM frames. `CLOSURE`, upvalues, heap cells, table
+construction/reads/writes, `SELF`, varargs and open returns are also handled.
+Stack/call-depth limits and source-line tracebacks are not implemented in the
+slice yet. Keep the default `backend = "legacy"` for production and untrusted
+code.
 
 ---
 
