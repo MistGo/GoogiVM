@@ -301,6 +301,44 @@ return function(t)
             "closure maxStack")
     end
 
+    -- Explicit frame suspension: tail calls, non-tail calls and depth limits.
+    local tail_src = "local function f(n) if n==0 then return 0 end; " ..
+        "return f(n-1) end; return f"
+    local tailf, terr2 = compile(tail_src, {}, { backend = "closure" })
+    t:check(tailf ~= nil, "tail frame compile: " .. tostring(terr2))
+    if tailf then
+        t:check(tailf()(100000) == 0, "tail frame reuse")
+    end
+
+    local rec_src = "local function f(n) if n==0 then return 0 end; " ..
+        "return 1+f(n-1) end; return f"
+    local recf, rerr2 = compile(rec_src, {}, { backend = "closure" })
+    t:check(recf ~= nil, "non-tail frame compile: " .. tostring(rerr2))
+    if recf then
+        t:check(recf()(1000) == 1000, "non-tail frame stack")
+    end
+
+    local depthf, derr = compile(rec_src, {},
+        { backend = "closure", maxCallDepth = 3 })
+    t:check(depthf ~= nil, "depth compile: " .. tostring(derr))
+    if depthf then
+        local ok, err = pcall(depthf(), 10)
+        t:check(not ok and tostring(err):find("call depth") ~= nil,
+            "closure maxCallDepth")
+    end
+
+    -- Chain traceback: source location and no host module path.
+    local tracef, trerr = compile(
+        "local function f() return 1 + nil end; return f", {},
+        { backend = "closure", sourceName = "trace.lua" })
+    t:check(tracef ~= nil, "trace compile: " .. tostring(trerr))
+    if tracef then
+        local ok, err = pcall(tracef())
+        t:check(not ok and tostring(err):find("trace.lua:") ~= nil and
+            not tostring(err):find("gvm_runtime.lua") ,
+            "closure traceback location")
+    end
+
     local lim, lerr = compile(
         "local function f(x) local s=0; for i=1,x do s=s+i end; " ..
         "return s end; return f", {}, { backend = "closure", maxInstructions = 20 })

@@ -406,7 +406,7 @@ local function append_trace(out, trace)
                     fl = site.call_line or fl
                 end
                 local label
-                if i == 1 then
+                if i == 1 and not fr.not_main then
                     label = "in main chunk"
                 elseif fp.name then
                     label = "in function '" .. fp.name .. "'"
@@ -586,6 +586,7 @@ end
 -- Filled in after the legacy interpreter; make_closure consults it only when
 -- a prototype explicitly opts into the v2 closure backend.
 local closure_backend = {}
+local chain_map = setmetatable({}, { __mode = "k" })
 
 local function make_closure(proto, upvals, fenv, set_native_env)
     local info
@@ -620,6 +621,9 @@ local function make_closure(proto, upvals, fenv, set_native_env)
     info[3] = native_env
     info[4] = not set_native_env
     closure_info[closure] = info
+    if chain then
+        chain_map[closure] = chain
+    end
     return closure
 end
 
@@ -3790,6 +3794,52 @@ function closure_backend.build_block_chain(proto, block, entries)
     return next_op
 end
 
+local function push_results(S, ret_sp, nres, rs)
+    local top = ret_sp
+    if nres < 0 then
+        for j = 1, rs.n do
+            top = top + 1
+            S[top] = rs[j]
+        end
+    elseif nres > 0 then
+        for j = 1, nres do
+            top = top + 1
+            if j <= rs.n then
+                S[top] = rs[j]
+            else
+                S[top] = nil
+            end
+        end
+    end
+    return top
+end
+
+local function return_results(st, rs)
+    local frames = st.frames
+    local nf = #frames
+    if nf > 0 then
+        local caller = frames[nf]
+        frames[nf] = nil
+        st.S = caller.S
+        st.ups = caller.ups
+        st.env = caller.env
+        st.va = caller.va
+        st.proto = caller.p
+        st.limits = caller.limits
+        st.pc = caller.pc
+        st.line = caller.line
+        local top = push_results(caller.S, caller.ret_sp, caller.nres, rs)
+        st.top = top
+        if st.limits.maxStack and top > st.limits.maxStack then
+            error("stack limit exceeded", 0)
+        end
+        return caller.cont
+    end
+    st.ret = rs
+    st.nret = rs.n
+    return nil
+end
+
 -- A true block closure: one Lua call executes the whole straight-line body
 -- with an internal dispatch, then returns the next block or stops.
 function closure_backend.build_block_closure(proto, block, entries, loop_info)
@@ -3820,6 +3870,8 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
     end
 
     local function block_closure(st)
+        st.pc = block.start
+        st.line = proto.lines and proto.lines[block.start]
         if st.max then
             st.steps = st.steps + n
             if st.steps > st.max then
@@ -4009,14 +4061,12 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
             if st.limits.maxReturns and nret > st.limits.maxReturns then
                 error("too many return values", 0)
             end
-            local ret = {}
+            local ret = { n = nret }
             local src = top - nret + 1
             for j = 1, nret do
                 ret[j] = S[src + j - 1]
             end
-            st.ret = ret
-            st.nret = nret
-            return nil
+            return return_results(st, ret)
         elseif op == 32 then
             return entries[term.a]
         elseif op == 31 then
@@ -4054,32 +4104,75 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
             if st.limits.maxStack and top > st.limits.maxStack then
                 error("stack limit exceeded", 0)
             end
+
+            local target_entry = chain_map[f]
+            local target_info = closure_info[f]
+            if target_entry and target_info then
+                local cp = target_info[1]
+                local S2 = {}
+                local np = cp.numparams
+                for j = 1, np do
+                    S2[j] = S[fpos + j]
+                end
+                for j = np + 1, cp.maxreg do
+                    S2[j] = nil
+                end
+                local cva
+                if cp.isvararg then
+                    local nv = nargs - np
+                    if nv > 0 then
+                        cva = { n = nv }
+                        for j = 1, nv do
+                            cva[j] = S[fpos + np + j]
+                        end
+                    end
+                end
+                if cp.limits and cp.limits.maxStack and
+                   cp.maxreg > cp.limits.maxStack then
+                    error("stack limit exceeded", 0)
+                end
+                if not tail then
+                    if st.limits.maxCallDepth and
+                       #st.frames + 1 >= st.limits.maxCallDepth then
+                        error("call depth limit exceeded", 0)
+                    end
+                    st.frames[#st.frames + 1] = {
+                        S = S,
+                        top = st.top,
+                        ups = st.ups,
+                        env = st.env,
+                        va = st.va,
+                        limits = st.limits,
+                        p = proto,
+                        pc = term.pc,
+                        line = proto.lines and proto.lines[term.pc],
+                        ret_sp = fpos - 1,
+                        nres = nres,
+                        cont = entries[block.nextpc],
+                    }
+                end
+                st.S = S2
+                st.top = cp.maxreg
+                st.proto = cp
+                st.ups = target_info
+                st.env = target_info[2]
+                st.va = cva
+                st.limits = cp.limits or st.limits
+                return target_entry
+            end
+
             local rs = pack(f(unpack(S, fpos + 1, top)))
             if tail then
-                st.ret = rs
-                st.nret = rs.n
-                return nil
+                return return_results(st, rs)
             end
-            top = fpos - 1
             if st.limits.maxReturns and nres > st.limits.maxReturns then
                 error("too many return values", 0)
             end
-            if nres < 0 then
-                for j = 1, rs.n do
-                    top = top + 1
-                    S[top] = rs[j]
-                end
-            elseif nres > 0 then
-                for j = 1, nres do
-                    top = top + 1
-                    if j <= rs.n then
-                        S[top] = rs[j]
-                    else
-                        S[top] = nil
-                    end
-                end
-            end
+            top = push_results(S, fpos - 1, nres, rs)
             st.top = top
+            if st.limits.maxStack and top > st.limits.maxStack then
+                error("stack limit exceeded", 0)
+            end
             return entries[block.nextpc]
         elseif op == 46 then
             local r = term.a
@@ -4240,6 +4333,29 @@ function closure_backend.build_program(proto)
     return entries[entry_pc]
 end
 
+local function chain_trace(proto, st)
+    local p = st.proto or proto
+    local frames = {}
+    for i = 1, #st.frames do
+        local fr = st.frames[i]
+        frames[i] = { p = fr.p, pc = fr.pc, line = fr.line,
+                      env = fr.env, not_main = true }
+    end
+    frames[#frames + 1] = {
+        p = p,
+        pc = st.pc or p.entry or 1,
+        line = st.line,
+        env = st.env,
+        not_main = true,
+    }
+    return {
+        [1] = st.pc or p.entry or 1,
+        frames = frames,
+        fi = #frames,
+        cur = { p = p, env = st.env },
+    }
+end
+
 function closure_backend.run_chain(proto, entry, upvals, ...)
     local args = pack(...)
     local limits = proto.limits or {}
@@ -4270,11 +4386,16 @@ function closure_backend.run_chain(proto, entry, upvals, ...)
     if max == math.huge then max = nil end
     local st = { S = S, top = proto.maxreg, ret = nil, nret = 0,
                  max = max, steps = 0, ups = upvals, va = va,
-                 limits = limits,
+                 limits = limits, frames = {}, proto = proto,
                  env = (upvals and upvals[2]) or proto.env }
     local op = entry
-    while op do
-        op = op(st)
+    local ok, err = pcall(function()
+        while op do
+            op = op(st)
+        end
+    end)
+    if not ok then
+        error(sandbox_error(err, chain_trace(proto, st), true), 0)
     end
     if st.nret == 0 then
         return

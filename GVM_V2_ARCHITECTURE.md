@@ -141,13 +141,15 @@ general default.
 - Implemented `CALLD` for native and interpreted targets, tail-call returns,
   result adjustment, `CLOSURE`, `GETUPVAL`/`SETUPVAL`, `CELL`/`GETCELL`/
   `SETCELL`, `MARK`/`POP`/`PEEK` and `SETLISTMULTI`.
-- Calls currently use host recursion; explicit frame suspension and
-  `maxCallDepth` are still pending.
+- Calls now suspend explicit VM frames; tail calls reuse the current frame.
 - `VARARG`, open returns and vararg table tails are implemented.
 - Globals and generic `for` work through `CALLD`/`MARK`/`JMPNIL`.
-- `maxInstructions`, `maxArgs`, `maxReturns` and `maxStack` are enforced.
+- `maxInstructions`, `maxArgs`, `maxReturns`, `maxStack` and `maxCallDepth`
+  are enforced.
+- A basic source-located traceback is attached to chain runtime errors.
 - Fresh-per-iteration loop cells with captured variables are still pending.
-- `pcall`/`xpcall` and traceback tests are still pending.
+- Guest `pcall`/`xpcall` sandbox formatting and broader traceback tests are
+  still pending.
 
 ### Phase 4 - tables, operators and metamethods (partial)
 
