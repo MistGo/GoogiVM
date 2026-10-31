@@ -339,6 +339,40 @@ return function(t)
             "closure traceback location")
     end
 
+    -- Fresh loop cells and guest protected calls.
+    local cell_src = "local function f() local fs={}; " ..
+        "for i=1,3 do fs[i]=function() return i end end; " ..
+        "return fs[1](),fs[2](),fs[3]() end; return f"
+    local cellf, cerr2 = compile(cell_src, {}, { backend = "closure" })
+    t:check(cellf ~= nil, "loop cell compile: " .. tostring(cerr2))
+    if cellf then
+        local got = pack(cellf()())
+        t:check(got[1] == 1 and got[2] == 2 and got[3] == 3,
+            "fresh loop cell per iteration")
+    end
+
+    local pcall_src = "local function bad() return 1+nil end; " ..
+        "local function f() local ok,err=pcall(bad); " ..
+        "return ok, tostring(err):find('arithmetic') ~= nil end; return f"
+    local pcallf, pcerr = compile(pcall_src,
+        { pcall = pcall, tostring = tostring }, { backend = "closure" })
+    t:check(pcallf ~= nil, "pcall compile: " .. tostring(pcerr))
+    if pcallf then
+        local got = pack(pcallf()())
+        t:check(got[1] == false and got[2] == true, "guest pcall formatting")
+    end
+
+    local xpcall_src = "local function bad() return 1+nil end; " ..
+        "local function f() local ok,err=xpcall(bad,function(e) " ..
+        "return 'handled' end); return ok,err end; return f"
+    local xpf, xperr = compile(xpcall_src, { xpcall = xpcall },
+        { backend = "closure" })
+    t:check(xpf ~= nil, "xpcall compile: " .. tostring(xperr))
+    if xpf then
+        local got = pack(xpf()())
+        t:check(got[1] == false and got[2] == "handled", "guest xpcall handler")
+    end
+
     local lim, lerr = compile(
         "local function f(x) local s=0; for i=1,x do s=s+i end; " ..
         "return s end; return f", {}, { backend = "closure", maxInstructions = 20 })

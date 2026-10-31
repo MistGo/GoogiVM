@@ -147,9 +147,9 @@ general default.
 - `maxInstructions`, `maxArgs`, `maxReturns`, `maxStack` and `maxCallDepth`
   are enforced.
 - A basic source-located traceback is attached to chain runtime errors.
-- Fresh-per-iteration loop cells with captured variables are still pending.
-- Guest `pcall`/`xpcall` sandbox formatting and broader traceback tests are
-  still pending.
+- Fresh-per-iteration loop cells with captured variables work.
+- Guest `pcall`/`xpcall` work; broader traceback/sandbox edge cases are still
+  being filled in.
 
 ### Phase 4 - tables, operators and metamethods (partial)
 

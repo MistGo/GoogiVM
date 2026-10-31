@@ -217,9 +217,10 @@ with explicit frames and tail-call reuse. `CLOSURE`, upvalues, heap cells,
 table construction/reads/writes, `SELF`, varargs/open returns, globals and
 generic `for` (through `CALLD`/`MARK`/`JMPNIL`) are also handled.
 `maxInstructions`, `maxArgs`, `maxReturns`, `maxStack` and `maxCallDepth` are
-enforced; runtime errors get a basic source-located traceback. Guest
-`pcall`/`xpcall` sandbox formatting and fresh loop cells are still incomplete.
-Keep the default `backend = "legacy"` for production and untrusted code.
+enforced; runtime errors get a source-located traceback. Guest `pcall`/`xpcall`
+and fresh loop cells work. Fused opcodes are still disabled in this mode, and
+broader metamethod/edge-case coverage is still being filled in. Keep the
+default `backend = "legacy"` for production and untrusted code.
 
 ---
 
