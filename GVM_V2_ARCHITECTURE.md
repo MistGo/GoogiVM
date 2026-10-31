@@ -165,15 +165,15 @@ legacy, closure and closure-fused modes.
 
 | Host mode | Legacy | Closure | Closure-fused | Fused / legacy |
 |---|---:|---:|---:|---:|
-| `luajit -joff` | 4.22 s | 16.25 s | **4.13 s** | **1.02x** |
-| `luajit` | 1.47 s | 9.05 s | **1.49 s** | **0.99x** |
+| `luajit -joff` | 4.025 s | 16.25 s | **4.043 s** | **0.996x** |
+| `luajit` | 1.436 s | 9.05 s | **1.522 s** | **0.94x** |
 
-All 16 tasks returned the correct result in all three modes. With fused
-opcodes, leaf inlining and the index/call superinstructions, the closure
-backend is now at parity with legacy on this local run: `spectral-norm` dropped
-from 1.8 s to 1.17 s and the total is 4.13 s against 4.22 s under `-joff`.
-Individual small tasks still move within noise. The default remains legacy
-until repeated local and in-game runs confirm the result.
+Medians of three runs. All 16 tasks returned the correct result in all three
+modes. With fused opcodes, leaf inlining and the index/call
+superinstructions, the closure backend is at parity with legacy under
+`-joff` and within measurement noise with the JIT. `spectral-norm` dropped
+from 1.8 s to about 1.17 s. The default remains legacy until in-game runs
+confirm the result.
 
 Fused data opcodes, numeric-`for` opcodes `112-118`, and branch fusions
 `102-103`, `147-153`, `169-180`, `181`, `187-192`, `198`, `204-208` are now
