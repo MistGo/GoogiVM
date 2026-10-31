@@ -220,10 +220,10 @@ generic `for` (through `CALLD`/`MARK`/`JMPNIL`) are also handled.
 enforced; runtime errors get a source-located traceback. Guest `pcall`/`xpcall`
 and fresh loop cells work. `fused = true` enables the data-opcode subset
 (`MOVLOCAL`, arithmetic, table reads/writes, assignments, `PUSH_OP_*`), the
-fused numeric-`for` terminators `112-118`, and comparison branches
-`102-103`/`147-153`/`169-180`. Fused call/index and specialized loop opcodes
-still fall back. Broader metamethod/edge-case coverage is still being filled
-in. Keep the
+fused numeric-`for` terminators `112-118`, comparison branches
+`102-103`/`147-153`/`169-180`, and the index/call superinstructions
+`181`/`198`/`204`/`205`. A few specialized loop shapes still fall back.
+Broader metamethod/edge-case coverage is still being filled in. Keep the
 default `backend = "legacy"` for production and untrusted code.
 
 ---

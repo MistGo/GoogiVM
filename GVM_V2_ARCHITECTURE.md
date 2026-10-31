@@ -165,20 +165,21 @@ legacy, closure and closure-fused modes.
 
 | Host mode | Legacy | Closure | Closure-fused | Fused / legacy |
 |---|---:|---:|---:|---:|
-| `luajit -joff` | 3.90 s | 15.10 s | **4.54 s** | **0.86x** |
-| `luajit` | 1.36 s | 8.30 s | **1.59 s** | **0.85x** |
+| `luajit -joff` | 3.96 s | 16.04 s | **4.76 s** | **0.83x** |
+| `luajit` | 1.42 s | 10.22 s | **1.67 s** | **0.85x** |
 
 All 16 tasks returned the correct result in all three modes. Fused data and
 numeric-`for` opcodes close most of the gap: most individual tasks are at
 0.95-1.05x. The remaining regression is concentrated in `spectral-norm`
-(about 0.64x under `-joff`), with smaller losses in `queens` and `oop`. Do not
-switch the default yet; profile the remaining indexed-loop/call hotspots.
+(about 0.61x under `-joff`), with smaller losses in `queens` and `oop`. Do not
+switch the default yet; profile the remaining indexed-loop hotspots.
 
 Fused data opcodes, numeric-`for` opcodes `112-118`, and branch fusions
-`102-103`, `147-153`, `169-180` are now supported behind `fused = true`.
-This covers moves, arithmetic, table access, construction, assignments,
-loop terminators and comparison branches. Remaining work is concentrated in
-`spectral-norm`-style indexed loops and call/index fusions.
+`102-103`, `147-153`, `169-180`, `181`, `198`, `204`, `205` are now supported
+behind `fused = true`. This covers moves, arithmetic, table access,
+construction, assignments, loop terminators, comparison branches and the
+index/call superinstructions used by spectral-norm. Remaining work is
+concentrated in the indexed-loop body itself.
 
 ### Phase 5 - selection and benchmarks
 

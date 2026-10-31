@@ -3433,6 +3433,7 @@ run_closure = function(fn, trace, ...)
         end
     end
 end
+local FUSED_CALL = { [181] = true, [205] = true }
 local FUSED_TERM = {
     [102] = true, [103] = true,
     [110] = true, [111] = true, [112] = true, [113] = true,
@@ -3470,7 +3471,7 @@ function closure_backend.scan_block(proto, start)
             return nil, "missing slot length at pc " .. tostring(pc)
         end
         local op = code[pc]
-        if FUSED_TERM[op] and pc ~= start then
+        if (FUSED_TERM[op] or FUSED_CALL[op]) and pc ~= start then
             -- A fused terminator is its own block. The preceding body ends
             -- before it and falls through to that block.
             return {
@@ -3493,7 +3494,7 @@ function closure_backend.scan_block(proto, start)
         -- RET, JMP, JMPF, TESTF, TESTT, CALLD, FORPREP, FORLOOP, JMPNIL.
         if op == 34 or op == 32 or op == 31 or op == 29 or op == 30 or
            op == 33 or op == 46 or op == 47 or op == 51 or
-           FUSED_TERM[op] then
+           FUSED_TERM[op] or FUSED_CALL[op] then
             return {
                 start = start,
                 finish = pc,
@@ -3840,6 +3841,49 @@ local function push_results(S, ret_sp, nres, rs)
     return top
 end
 
+local function chain_call(st, f, a, b, nres, cont, S, top)
+    local target_entry = chain_map[f]
+    local target_info = closure_info[f]
+    if target_entry and target_info then
+        local cp = target_info[1]
+        local S2 = { a, b }
+        for j = 3, cp.maxreg do S2[j] = nil end
+        if st.limits.maxCallDepth and
+           #st.frames + 1 >= st.limits.maxCallDepth then
+            error("call depth limit exceeded", 0)
+        end
+        st.frames[#st.frames + 1] = {
+            S = S,
+            top = top,
+            ups = st.ups,
+            env = st.env,
+            va = st.va,
+            limits = st.limits,
+            p = st.proto,
+            pc = st.pc,
+            line = st.line,
+            ret_sp = top,
+            nres = nres,
+            cont = cont,
+        }
+        st.S = S2
+        st.top = cp.maxreg
+        st.proto = cp
+        st.ups = target_info
+        st.env = target_info[2]
+        st.va = nil
+        st.limits = cp.limits or st.limits
+        return target_entry
+    end
+    local rs = pack(f(a, b))
+    local newtop = push_results(S, top, nres, rs)
+    st.top = newtop
+    if st.limits.maxStack and newtop > st.limits.maxStack then
+        error("stack limit exceeded", 0)
+    end
+    return cont
+end
+
 local function return_results(st, rs)
     local frames = st.frames
     local nf = #frames
@@ -3882,7 +3926,9 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
             top_op == 29 or top_op == 30 or top_op == 51 or
             top_op == 46 or top_op == 47 or top_op == 33 or
             top_op == 102 or top_op == 103 or
+            top_op == 110 or top_op == 111 or
             (top_op >= 112 and top_op <= 118) or
+            top_op == 181 or top_op == 204 or top_op == 205 or
             (top_op >= 147 and top_op <= 153) or
             (top_op >= 169 and top_op <= 180)) then
         return nil, "unsupported terminator " .. tostring(top_op)
@@ -3896,7 +3942,7 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
             (op >= 52 and op <= 57) or
             (op >= 58 and op <= 69) or (op >= 88 and op <= 94) or
             (op >= 134 and op <= 139) or (op >= 154 and op <= 157) or
-            (op >= 164 and op <= 168) or
+            op == 198 or (op >= 164 and op <= 168) or
             op == 44 or op == 45 or op == 48 or op == 49 or
             (op >= 13 and op <= 22) or (op >= 23 and op <= 28)
         if not ok then
@@ -4120,6 +4166,9 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
                     S[ins.a] = S[ins.b]
                     S[ins.b] = tmp
                 end
+            elseif op == 198 then -- INDEX_ADD_RK
+                top = top + 1
+                S[top] = S[ins.a][S[ins.b] + K[ins.c]]
             elseif op >= 134 and op <= 139 then -- fused table construction
                 if op == 134 then
                     S[ins.a] = {}
@@ -4462,6 +4511,61 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
                 end
             end
             return entries[block.nextpc]
+        elseif op == 181 then
+            local u = term.a
+            local f = st.ups[u + 4].v
+            local a = S[term.b]
+            local b = S[term.c]
+            local nres = proto.code[term.pc + 4]
+            return chain_call(st, f, a, b, nres,
+                entries[block.nextpc], S, top)
+        elseif op == 205 then
+            top = top + 1
+            S[top] = S[term.a][S[term.b] + K[term.c]]
+            local u = proto.code[term.pc + 4]
+            local f = st.ups[u + 4].v
+            local a = S[proto.code[term.pc + 5]]
+            local b = S[proto.code[term.pc + 6]]
+            local nres = proto.code[term.pc + 7]
+            return chain_call(st, f, a, b, nres,
+                entries[block.nextpc], S, top)
+        elseif op == 110 or op == 111 then
+            local r = term.a
+            local step = S[r + 2]
+            local limit = S[r + 1]
+            local idx = S[r] + step
+            if (step > 0 and idx <= limit) or
+               (step < 0 and idx >= limit) then
+                S[r] = idx
+                if op == 110 then
+                    S[term.b] = idx
+                else
+                    S[term.b] = { v = idx }
+                end
+                return entries[term.c]
+            end
+            return entries[block.nextpc]
+        elseif op == 204 then
+            local a = S[top]
+            local b = S[top - 1]
+            local c = S[top - 2]
+            S[top] = nil
+            S[top - 1] = nil
+            S[top - 2] = nil
+            S[term.a] = c + (b * a)
+            top = top - 3
+            st.top = top
+            local r = term.b
+            local step = S[r + 2]
+            local limit = S[r + 1]
+            local idx = S[r] + step
+            if (step > 0 and idx <= limit) or
+               (step < 0 and idx >= limit) then
+                S[r] = idx
+                S[term.c] = idx
+                return entries[proto.code[term.pc + 4]]
+            end
+            return entries[block.nextpc]
         elseif op >= 112 and op <= 118 then
             local r = term.a
             local step = S[r + 2]
@@ -4576,6 +4680,11 @@ function closure_backend.build_program(proto)
             if ok then ok, e = need(block.nextpc) end
         elseif op >= 169 and op <= 180 then
             ok, e = need(term.c)
+            if ok then ok, e = need(block.nextpc) end
+        elseif op == 181 or op == 205 then
+            ok, e = need(block.nextpc)
+        elseif op == 204 then
+            ok, e = need(proto.code[term.pc + 4])
             if ok then ok, e = need(block.nextpc) end
         elseif op >= 112 and op <= 118 then
             local nxt = (op >= 114 and op <= 116) and

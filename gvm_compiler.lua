@@ -92,6 +92,7 @@ local function custom_loadstring(source, env, opts)
         fused = opts.fused
     end
     local skip_fusions = backend == "closure" and not fused
+    local skip_calls = false
 
     local function compile()
         local len = #source
@@ -740,7 +741,7 @@ local function custom_loadstring(source, env, opts)
         -- Post-compile peephole optimizer: fuses frequent instruction
         -- sequences into superinstructions without shifting code.
         -- ========================================================
-        local function optimize_code(co, n, skip_fusions)
+        local function optimize_code(co, n, skip_fusions, skip_calls)
             if skip_fusions then return end
             local targets = {}
             local dead = {}
@@ -1422,7 +1423,7 @@ local function custom_loadstring(source, env, opts)
                 end
 
                 -- GETUPVAL + MARK + GETLOCAL + GETLOCAL + CALLD
-                if pos + 16 <= n and co[pos] == GETUPVAL and
+                if not skip_calls and pos + 16 <= n and co[pos] == GETUPVAL and
                    co[pos + 4] == MARK and
                    co[pos + 8] == GETLOCAL and
                    co[pos + 12] == GETLOCAL and
@@ -1441,7 +1442,7 @@ local function custom_loadstring(source, env, opts)
                 end
 
                 -- GETUPVAL + MARK + GETLOCAL + CALLD
-                if pos + 12 <= n and co[pos] == GETUPVAL and
+                if not skip_calls and pos + 12 <= n and co[pos] == GETUPVAL and
                    co[pos + 4] == MARK and
                    co[pos + 8] == GETLOCAL and
                    co[pos + 12] == CALLD and
@@ -1604,7 +1605,7 @@ local function custom_loadstring(source, env, opts)
 
             -- `v[j + k]` pushed immediately before a two-argument upvalue call.
             for pc = 1, n, 4 do
-                if not dead[pc] and pc + 20 <= n and
+                if not skip_calls and not dead[pc] and pc + 20 <= n and
                    co[pc] == FOP.INDEX_ADD_RK and
                    not dead[pc + 20] and co[pc + 20] == FOP.CALL_U_RR2 and
                    co[pc + 24] == 1 and
@@ -2624,7 +2625,7 @@ local function custom_loadstring(source, env, opts)
                 rawcode[i] = child.code[i]
             end
             child.code.slotlen = child.slotlen
-        optimize_code(child.code, child.ncode, skip_fusions)
+        optimize_code(child.code, child.ncode, skip_fusions, skip_calls)
             if child.ncode > limits.maxCodeSlots then
                 error("code exceeds maxCodeSlots", 0)
             end
@@ -3315,7 +3316,7 @@ local function custom_loadstring(source, env, opts)
         end
         emit(RET, 0, 0, 0)
         fc.code.slotlen = fc.slotlen
-        optimize_code(fc.code, fc.ncode, skip_fusions)
+        optimize_code(fc.code, fc.ncode, skip_fusions, skip_calls)
         if fc.ncode > limits.maxCodeSlots then
             error("code exceeds maxCodeSlots", 0)
         end

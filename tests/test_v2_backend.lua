@@ -464,6 +464,23 @@ return function(t)
             "fused and/or branches")
     end
 
+    local fused_call_src = "local function ev(i,j) return i+j end; " ..
+        "local function f(v,out) for i=0,1 do local t=0; " ..
+        "for j=0,1 do t=t+v[j+1]*ev(i,j) end; out[i+1]=t end end; " ..
+        "return f"
+    local fcf, fcerr = compile(fused_call_src, {},
+        { backend = "closure", fused = true })
+    t:check(fcf ~= nil, "fused call compile: " .. tostring(fcerr))
+    if fcf then
+        local f = fcf()
+        local p = rt.closure_info[f][1]
+        local ce, cee = rt.build_program(p)
+        t:check(ce ~= nil, "fused call chain: " .. tostring(cee))
+        local out = {}
+        f({ 1, 2 }, out)
+        t:check(out[1] == 2 and out[2] == 5, "fused index/call loop")
+    end
+
     local badfused, bferr = compile("return 1", {}, { fused = "yes" })
     t:check(badfused == nil and tostring(bferr):find("fused") ~= nil,
         "invalid fused option is rejected")
