@@ -2309,7 +2309,7 @@ local function custom_loadstring(source, env, opts)
                 local kind, ref = resolve_var(name)
                 local p = function_proto(kind, ref)
                 local proto = p and p.simple and p or nil
-                if backend ~= "closure" and tk == "(" and proto and try_inline_call(proto) then
+                if (backend ~= "closure" or fused) and tk == "(" and proto and try_inline_call(proto) then
                     compile_suffix()
                 else
                     local save_no_tail = no_tail_call

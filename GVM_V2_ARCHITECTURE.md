@@ -165,21 +165,23 @@ legacy, closure and closure-fused modes.
 
 | Host mode | Legacy | Closure | Closure-fused | Fused / legacy |
 |---|---:|---:|---:|---:|
-| `luajit -joff` | 3.96 s | 16.04 s | **4.76 s** | **0.83x** |
-| `luajit` | 1.42 s | 10.22 s | **1.67 s** | **0.85x** |
+| `luajit -joff` | 4.22 s | 16.25 s | **4.13 s** | **1.02x** |
+| `luajit` | 1.47 s | 9.05 s | **1.49 s** | **0.99x** |
 
-All 16 tasks returned the correct result in all three modes. Fused data and
-numeric-`for` opcodes close most of the gap: most individual tasks are at
-0.95-1.05x. The remaining regression is concentrated in `spectral-norm`
-(about 0.61x under `-joff`), with smaller losses in `queens` and `oop`. Do not
-switch the default yet; profile the remaining indexed-loop hotspots.
+All 16 tasks returned the correct result in all three modes. With fused
+opcodes, leaf inlining and the index/call superinstructions, the closure
+backend is now at parity with legacy on this local run: `spectral-norm` dropped
+from 1.8 s to 1.17 s and the total is 4.13 s against 4.22 s under `-joff`.
+Individual small tasks still move within noise. The default remains legacy
+until repeated local and in-game runs confirm the result.
 
 Fused data opcodes, numeric-`for` opcodes `112-118`, and branch fusions
-`102-103`, `147-153`, `169-180`, `181`, `198`, `204`, `205` are now supported
-behind `fused = true`. This covers moves, arithmetic, table access,
+`102-103`, `147-153`, `169-180`, `181`, `187-192`, `198`, `204-208` are now
+supported behind `fused = true`. This covers moves, arithmetic, table access,
 construction, assignments, loop terminators, comparison branches and the
-index/call superinstructions used by spectral-norm. Remaining work is
-concentrated in the indexed-loop body itself.
+index/call superinstructions used by spectral-norm. Fused mode also enables
+leaf inlining. The remaining work is backend selection and repeated validation,
+not a missing opcode family.
 
 ### Phase 5 - selection and benchmarks
 

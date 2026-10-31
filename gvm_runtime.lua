@@ -3929,6 +3929,7 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
             top_op == 110 or top_op == 111 or
             (top_op >= 112 and top_op <= 118) or
             top_op == 181 or top_op == 204 or top_op == 205 or
+            top_op == 206 or top_op == 208 or
             (top_op >= 147 and top_op <= 153) or
             (top_op >= 169 and top_op <= 180)) then
         return nil, "unsupported terminator " .. tostring(top_op)
@@ -3942,7 +3943,8 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
             (op >= 52 and op <= 57) or
             (op >= 58 and op <= 69) or (op >= 88 and op <= 94) or
             (op >= 134 and op <= 139) or (op >= 154 and op <= 157) or
-            op == 198 or (op >= 164 and op <= 168) or
+            op == 198 or op == 207 or (op >= 164 and op <= 168) or
+            (op >= 187 and op <= 192) or
             op == 44 or op == 45 or op == 48 or op == 49 or
             (op >= 13 and op <= 22) or (op >= 23 and op <= 28)
         if not ok then
@@ -4166,6 +4168,38 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
                     S[ins.a] = S[ins.b]
                     S[ins.b] = tmp
                 end
+            elseif op == 187 then -- ADD_RR_ADD_K
+                top = top + 1
+                S[top] = S[ins.a] + S[ins.b] + K[ins.c]
+            elseif op == 188 then -- MUL_DIV_K
+                local a = S[top - 1]
+                local b = S[top]
+                S[top] = nil
+                top = top - 1
+                S[top] = (a * b) / K[ins.a]
+            elseif op == 189 then -- ADD_R_ADD_K
+                S[top] = S[top] + S[ins.a] + K[ins.b]
+            elseif op == 191 then -- GETGLOBAL_FIELD
+                top = top + 1
+                S[top] = st.env[K[ins.a]][K[ins.b]]
+            elseif op == 192 then -- PUSH_OP_RS_ADD
+                local x = S[top]
+                local y = S[ins.a]
+                local kind = proto.code[ins.pc + 2]
+                local v
+                if kind == 13 then v = x + y
+                elseif kind == 14 then v = x - y
+                elseif kind == 15 then v = x * y
+                elseif kind == 16 then v = x / y
+                elseif kind == 17 then v = x % y
+                elseif kind == 18 then v = x ^ y
+                else v = x .. y end
+                local prev = S[top - 1]
+                S[top] = nil
+                S[top - 1] = prev + v
+                top = top - 1
+            elseif op == 207 then -- DIV_K
+                S[top] = K[ins.a] / S[top]
             elseif op == 198 then -- INDEX_ADD_RK
                 top = top + 1
                 S[top] = S[ins.a][S[ins.b] + K[ins.c]]
@@ -4545,6 +4579,51 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
                 return entries[term.c]
             end
             return entries[block.nextpc]
+        elseif op == 206 then
+            local denom = S[top]
+            local num = S[top - 1]
+            local q = num / denom
+            local v = S[top - 2]
+            local t = S[top - 3]
+            S[top] = nil
+            S[top - 1] = nil
+            S[top - 2] = nil
+            S[top - 3] = nil
+            S[proto.code[term.pc + 1]] = t + v * q
+            top = top - 4
+            st.top = top
+            local r = proto.code[term.pc + 2]
+            local step = S[r + 2]
+            local limit = S[r + 1]
+            local idx = S[r] + step
+            if (step > 0 and idx <= limit) or
+               (step < 0 and idx >= limit) then
+                S[r] = idx
+                S[proto.code[term.pc + 3]] = idx
+                return entries[proto.code[term.pc + 4]]
+            end
+            return entries[block.nextpc]
+        elseif op == 208 then
+            local q = K[proto.code[term.pc + 1]] / S[top]
+            local v = S[top - 1]
+            local t = S[top - 2]
+            S[top] = nil
+            S[top - 1] = nil
+            S[top - 2] = nil
+            S[proto.code[term.pc + 2]] = t + v * q
+            top = top - 3
+            st.top = top
+            local r = proto.code[term.pc + 3]
+            local step = S[r + 2]
+            local limit = S[r + 1]
+            local idx = S[r] + step
+            if (step > 0 and idx <= limit) or
+               (step < 0 and idx >= limit) then
+                S[r] = idx
+                S[proto.code[term.pc + 4]] = idx
+                return entries[proto.code[term.pc + 5]]
+            end
+            return entries[block.nextpc]
         elseif op == 204 then
             local a = S[top]
             local b = S[top - 1]
@@ -4683,6 +4762,12 @@ function closure_backend.build_program(proto)
             if ok then ok, e = need(block.nextpc) end
         elseif op == 181 or op == 205 then
             ok, e = need(block.nextpc)
+        elseif op == 206 then
+            ok, e = need(proto.code[term.pc + 4])
+            if ok then ok, e = need(block.nextpc) end
+        elseif op == 208 then
+            ok, e = need(proto.code[term.pc + 5])
+            if ok then ok, e = need(block.nextpc) end
         elseif op == 204 then
             ok, e = need(proto.code[term.pc + 4])
             if ok then ok, e = need(block.nextpc) end

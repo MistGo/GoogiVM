@@ -221,9 +221,11 @@ enforced; runtime errors get a source-located traceback. Guest `pcall`/`xpcall`
 and fresh loop cells work. `fused = true` enables the data-opcode subset
 (`MOVLOCAL`, arithmetic, table reads/writes, assignments, `PUSH_OP_*`), the
 fused numeric-`for` terminators `112-118`, comparison branches
-`102-103`/`147-153`/`169-180`, and the index/call superinstructions
-`181`/`198`/`204`/`205`. A few specialized loop shapes still fall back.
-Broader metamethod/edge-case coverage is still being filled in. Keep the
+`102-103`/`147-153`/`169-180`, the index/call and arithmetic superinstructions
+`181`/`187-192`/`198`/`204-208`, and leaf-function inlining. A few specialized
+loop shapes still fall back. Fused mode is at local parity with legacy on the
+16-task suite; it still needs repeated and in-game validation before becoming
+the default. Keep the
 default `backend = "legacy"` for production and untrusted code.
 
 ---
