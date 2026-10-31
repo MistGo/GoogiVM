@@ -373,6 +373,37 @@ return function(t)
         t:check(got[1] == false and got[2] == "handled", "guest xpcall handler")
     end
 
+    -- Host metamethod dispatch through chain closures.
+    local meta_env = { setmetatable = setmetatable, tostring = tostring }
+    local index_src = "local function f() local t=setmetatable({},{__index=" ..
+        "function(_,k) return k..'!' end}); return t.x end; return f"
+    local indexf, indexerr = compile(index_src, meta_env,
+        { backend = "closure" })
+    t:check(indexf ~= nil, "metaindex compile: " .. tostring(indexerr))
+    if indexf then
+        t:check(indexf()() == "x!", "metamethod __index")
+    end
+
+    local add_src = "local function f() local mt={__add=function(a,b) " ..
+        "return a.n+b.n end}; local a=setmetatable({n=2},mt); " ..
+        "return (a+a) end; return f"
+    local addf, adderr = compile(add_src, meta_env,
+        { backend = "closure" })
+    t:check(addf ~= nil, "metaadd compile: " .. tostring(adderr))
+    if addf then
+        t:check(addf()() == 4, "metamethod __add")
+    end
+
+    local call_src = "local function f() local t=setmetatable({n=3}," ..
+        "{__call=function(self,x) return self.n+x end}); return t(4) " ..
+        "end; return f"
+    local callmf, callerr = compile(call_src, meta_env,
+        { backend = "closure" })
+    t:check(callmf ~= nil, "metacall compile: " .. tostring(callerr))
+    if callmf then
+        t:check(callmf()() == 7, "metamethod __call")
+    end
+
     local lim, lerr = compile(
         "local function f(x) local s=0; for i=1,x do s=s+i end; " ..
         "return s end; return f", {}, { backend = "closure", maxInstructions = 20 })
