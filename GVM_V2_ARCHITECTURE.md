@@ -161,25 +161,24 @@ general default.
 ### Current 16-task baseline (local)
 
 `benchmarks/bench_backend_compare.lua` runs `benchmarks/benchreal.lua` through
-both backends.
+legacy, closure and closure-fused modes.
 
 | Host mode | Legacy | Closure | Closure-fused | Fused / legacy |
 |---|---:|---:|---:|---:|
-| `luajit -joff` | 4.00 s | 15.31 s | **4.60 s** | **0.87x** |
-| `luajit` | 1.40 s | 7.27 s | **1.75 s** | **0.80x** |
+| `luajit -joff` | 3.90 s | 15.10 s | **4.54 s** | **0.86x** |
+| `luajit` | 1.36 s | 8.30 s | **1.59 s** | **0.85x** |
 
 All 16 tasks returned the correct result in all three modes. Fused data and
 numeric-`for` opcodes close most of the gap: most individual tasks are at
 0.95-1.05x. The remaining regression is concentrated in `spectral-norm`
 (about 0.64x under `-joff`), with smaller losses in `queens` and `oop`. Do not
-switch the default yet; finish fused branch/control-flow opcodes and profile
-the remaining hotspots.
+switch the default yet; profile the remaining indexed-loop/call hotspots.
 
-Fused data opcodes and numeric-`for` opcodes `112-118` are now supported behind
-`fused = true`: `MOVLOCAL`/`SETLOCAL_*`, arithmetic `58-69`, table `88-94`,
-construction `134-139`, assignments/swaps `154-157`,
-`PUSH_OP_*`/`ASSIGN_TO_*`, and the fused loop terminators. Fused branch
-`JMPF`/`JMPT` fusions are the next group.
+Fused data opcodes, numeric-`for` opcodes `112-118`, and branch fusions
+`102-103`, `147-153`, `169-180` are now supported behind `fused = true`.
+This covers moves, arithmetic, table access, construction, assignments,
+loop terminators and comparison branches. Remaining work is concentrated in
+`spectral-norm`-style indexed loops and call/index fusions.
 
 ### Phase 5 - selection and benchmarks
 

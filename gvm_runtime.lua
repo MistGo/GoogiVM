@@ -3881,7 +3881,10 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
     if not split and not (top_op == 34 or top_op == 32 or top_op == 31 or
             top_op == 29 or top_op == 30 or top_op == 51 or
             top_op == 46 or top_op == 47 or top_op == 33 or
-            (top_op >= 112 and top_op <= 118)) then
+            top_op == 102 or top_op == 103 or
+            (top_op >= 112 and top_op <= 118) or
+            (top_op >= 147 and top_op <= 153) or
+            (top_op >= 169 and top_op <= 180)) then
         return nil, "unsupported terminator " .. tostring(top_op)
     end
     local body_n = split and n or (n - 1)
@@ -4335,6 +4338,130 @@ function closure_backend.build_block_closure(proto, block, entries, loop_info)
                 return entries[loop_info.exit]
             end
             return entries[block.nextpc]
+        elseif op == 102 or op == 103 then
+            local target = term.b
+            if op == 102 then
+                if not S[term.a] then return entries[target] end
+            else
+                if S[term.a] == nil then return entries[target] end
+            end
+            return entries[block.nextpc]
+        elseif op >= 147 and op <= 150 then
+            local cop = proto.code[term.pc + 4]
+            local a = S[term.a]
+            local b = (op == 147 or op == 149) and S[term.b] or K[term.b]
+            local v = compare_op(cop, a, b)
+            if op == 147 or op == 148 then
+                if v then return entries[block.nextpc] end
+            elseif v then
+                top = top + 1
+                S[top] = v
+                return entries[term.c]
+            else
+                return entries[block.nextpc]
+            end
+            if not v then
+                top = top + 1
+                S[top] = v
+                return entries[term.c]
+            end
+            return entries[block.nextpc]
+        elseif op == 151 or op == 152 then
+            local cop = proto.code[term.pc + 4]
+            local a = S[term.a]
+            local b = op == 151 and S[term.b] or K[term.b]
+            if not compare_op(cop, a, b) then
+                return entries[term.c]
+            end
+            return entries[block.nextpc]
+        elseif op == 153 then
+            local cop = proto.code[term.pc + 4]
+            local a = S[top]
+            S[top] = nil
+            st.top = top - 1
+            if not compare_op(cop, a, K[term.a]) then
+                return entries[term.b]
+            end
+            return entries[block.nextpc]
+        elseif op >= 169 and op <= 180 then
+            local cop
+            if op <= 174 then
+                cop = 25 + (op - 169)
+                if cop > 28 then cop = 23 + (op - 173) end
+                local a = S[term.a]
+                local b = S[term.b]
+                if compare_op(cop, a, b) then
+                    return entries[term.c]
+                end
+            else
+                cop = 25 + (op - 175)
+                if cop > 28 then cop = 23 + (op - 179) end
+                if compare_op(cop, S[term.a], K[term.b]) then
+                    return entries[term.c]
+                end
+            end
+            return entries[block.nextpc]
+        elseif op == 102 or op == 103 then
+            local target = term.b
+            if op == 102 then
+                if not S[term.a] then return entries[target] end
+            else
+                if S[term.a] == nil then return entries[target] end
+            end
+            return entries[block.nextpc]
+        elseif op >= 147 and op <= 150 then
+            local cop = proto.code[term.pc + 4]
+            local a = S[term.a]
+            local b = (op == 147 or op == 149) and S[term.b] or K[term.b]
+            local v = compare_op(cop, a, b)
+            if op == 147 or op == 148 then
+                if v then return entries[block.nextpc] end
+            elseif v then
+                top = top + 1
+                S[top] = v
+                return entries[term.c]
+            else
+                return entries[block.nextpc]
+            end
+            if not v then
+                top = top + 1
+                S[top] = v
+                return entries[term.c]
+            end
+            return entries[block.nextpc]
+        elseif op == 151 or op == 152 then
+            local cop = proto.code[term.pc + 4]
+            local a = S[term.a]
+            local b = op == 151 and S[term.b] or K[term.b]
+            if not compare_op(cop, a, b) then
+                return entries[term.c]
+            end
+            return entries[block.nextpc]
+        elseif op == 153 then
+            local cop = proto.code[term.pc + 4]
+            local a = S[top]
+            S[top] = nil
+            st.top = top - 1
+            if not compare_op(cop, a, K[term.a]) then
+                return entries[term.b]
+            end
+            return entries[block.nextpc]
+        elseif op >= 169 and op <= 180 then
+            local cop
+            if op <= 174 then
+                cop = 25 + (op - 169)
+                if cop > 28 then cop = 23 + (op - 173) end
+                if compare_op(cop, S[term.a], S[term.b]) then
+                    return entries[term.c]
+                end
+            else
+                cop = 25 + (op - 175)
+                if cop > 28 then cop = 23 + (op - 179) end
+                if compare_op(cop, S[term.a], K[term.b]) then
+                    return entries[term.c]
+                end
+            end
+            return entries[block.nextpc]
         elseif op >= 112 and op <= 118 then
             local r = term.a
             local step = S[r + 2]
@@ -4434,6 +4561,21 @@ function closure_backend.build_program(proto)
             if ok then ok, e = need(block.nextpc) end
         elseif op == 46 or op == 47 then
             ok, e = need(term.b)
+            if ok then ok, e = need(block.nextpc) end
+        elseif op == 102 or op == 103 then
+            ok, e = need(term.b)
+            if ok then ok, e = need(block.nextpc) end
+        elseif op >= 147 and op <= 150 then
+            ok, e = need(term.c)
+            if ok then ok, e = need(block.nextpc) end
+        elseif op == 151 or op == 152 then
+            ok, e = need(term.c)
+            if ok then ok, e = need(block.nextpc) end
+        elseif op == 153 then
+            ok, e = need(term.b)
+            if ok then ok, e = need(block.nextpc) end
+        elseif op >= 169 and op <= 180 then
+            ok, e = need(term.c)
             if ok then ok, e = need(block.nextpc) end
         elseif op >= 112 and op <= 118 then
             local nxt = (op >= 114 and op <= 116) and

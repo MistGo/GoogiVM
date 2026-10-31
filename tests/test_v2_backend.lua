@@ -433,6 +433,37 @@ return function(t)
         t:check(f(5) == 15, "fused table/sum loop")
     end
 
+    local fused_if_src = "local function f(x) if x>2 then return 1 " ..
+        "else return 2 end end; return f"
+    local fif, fiferr = compile(fused_if_src, {},
+        { backend = "closure", fused = true })
+    t:check(fif ~= nil, "fused if compile: " .. tostring(fiferr))
+    if fif then
+        local f = fif()
+        local p = rt.closure_info[f][1]
+        local ce, cee = rt.build_program(p)
+        t:check(ce ~= nil, "fused if chain: " .. tostring(cee))
+        t:check(f(5) == 1 and f(1) == 2, "fused comparison branch")
+    end
+
+    local fused_while_src = "local function f(x) local s=0; " ..
+        "while s<x do s=s+1 end; return s end; return f"
+    local fwh, fwherr = compile(fused_while_src, {},
+        { backend = "closure", fused = true })
+    t:check(fwh ~= nil, "fused while compile: " .. tostring(fwherr))
+    if fwh then
+        t:check(fwh()(5) == 5, "fused while branch")
+    end
+
+    local fused_and_src = "local function f(x) return x and 10 or 20 end; return f"
+    local fand, fanderr = compile(fused_and_src, {},
+        { backend = "closure", fused = true })
+    t:check(fand ~= nil, "fused and/or compile: " .. tostring(fanderr))
+    if fand then
+        t:check(fand()(false) == 20 and fand()(true) == 10,
+            "fused and/or branches")
+    end
+
     local badfused, bferr = compile("return 1", {}, { fused = "yes" })
     t:check(badfused == nil and tostring(bferr):find("fused") ~= nil,
         "invalid fused option is rejected")
